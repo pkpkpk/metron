@@ -1,0 +1,223 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+
+  "Description":"",
+
+  "Parameters" : {
+
+    "KeyName": {
+      "Description" : "KeyPair to enable SSH access to the instance",
+      "Type": "AWS::EC2::KeyPair::KeyName",
+      "ConstraintDescription" : "must be the name of an existing EC2 KeyPair."
+    },
+
+    "InstanceType" : {
+      "Description" : "EC2 instance type",
+      "Type" : "String",
+      "Default" : "t2.small",
+      "AllowedValues" : [
+        "t1.micro",
+        "t2.nano",
+        "t2.micro",
+        "t2.small",
+        "t2.medium"]
+    },
+
+    "LatestAmiId" : {
+      "Default" : "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2",
+      "Type": "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>"
+    },
+
+    "SSHLocation" : {
+      "Description" : "The IP address range that can be used to SSH to the EC2 instances",
+      "Type": "String",
+      "MinLength": "9",
+      "MaxLength": "18",
+      "Default": "0.0.0.0/0",
+      "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+      "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+    },
+
+    "WebhookSrc": {"Type" : "String"},
+
+    "WebhookSecret": {"Type": "String"}
+  },
+  "Outputs" : {
+    "InstanceId" : {
+      "Description" : "InstanceId of the newly created EC2 instance",
+      "Value" : { "Ref" : "EC2Instance" }
+    },
+    "AZ" : {
+      "Description" : "Availability Zone of the newly created EC2 instance",
+      "Value" : { "Fn::GetAtt" : [ "EC2Instance", "AvailabilityZone" ] }
+    },
+    "PublicDNS" : {
+      "Description" : "Public DNSName of the newly created EC2 instance",
+      "Value" : { "Fn::GetAtt" : [ "EC2Instance", "PublicDnsName" ] }
+    },
+    "PublicIP" : {
+      "Description" : "Public IP address of the newly created EC2 instance",
+      "Value" : { "Fn::GetAtt" : [ "EC2Instance", "PublicIp" ] }
+    }
+  },
+
+  "Resources" : {
+    "WebhookExecutionRole" : {
+      "Type" : "AWS::IAM::Role",
+      "Properties": {
+        "RoleName" : "metron_webhook_execution_role",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+              {
+                  "Effect": "Allow",
+                  "Principal": {
+                      "Service": "lambda.amazonaws.com"
+                  },
+                  "Action": "sts:AssumeRole"
+              }
+          ]
+        },
+        "Policies": [{
+          "PolicyName" : "metron_lambda_resource_policy",
+          "PolicyDocument":{
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "VisualEditor0",
+                    "Effect": "Allow",
+                    "Action": [
+                        "logs:CreateLogStream",
+                        "logs:CreateLogGroup",
+                        "logs:PutLogEvents"
+                    ],
+                    "Resource": "arn:aws:logs:*:*:*"
+                },
+                {
+                    "Sid": "VisualEditor1",
+                    "Effect": "Allow",
+                    "Action": [
+                        "ssm:SendCommand",
+                        "ec2:*"
+                    ],
+                    "Resource": "*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "WebhookLambda" : {
+      "DependsOn": ["EC2Instance", "WebhookExecutionRole"],
+      "Type" : "AWS::Lambda::Function",
+      "Properties" : {
+        "FunctionName": "metron_webhook_lambda",
+        "Handler": "index.handler",
+        "Role": { "Fn::GetAtt" : ["WebhookExecutionRole", "Arn"] },
+        "Code": { "ZipFile": {"Ref": "WebhookSrc"}},
+        "Runtime": "nodejs18.x",
+        "Timeout": 90,
+        "Environment" : {
+          "Variables" : {
+            "WEBHOOK_SECRET" : { "Ref" : "WebhookSecret" },
+            "REGION" : { "Ref" : "AWS::Region" },
+            "INSTANCE_ID" : {"Ref" : "EC2Instance"}
+          }
+        }
+      }
+    },
+    "WebhookPermission": {
+      "DependsOn" : ["WebhookLambda"],
+      "Type" : "AWS::Lambda::Permission",
+      "Properties" : {
+        "Action" : "lambda:InvokeFunctionUrl",
+        "Principal" : "*",
+        "FunctionName" : "metron_webhook_lambda",
+        "FunctionUrlAuthType" : "NONE"
+      }
+    },
+    "WebhookUrl": {
+      "DependsOn" : ["WebhookLambda"],
+      "Type" : "AWS::Lambda::Url",
+      "Properties" : {
+        "AuthType" : "NONE",
+        "TargetFunctionArn" : {"Ref":"WebhookLambda"}
+      }
+    },
+    "InstanceSecurityGroup" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "GroupDescription" : "Enable SSH access via port 22",
+        "SecurityGroupIngress" : [ {
+          "IpProtocol" : "tcp",
+          "FromPort" : "22",
+          "ToPort" : "22",
+          "CidrIp" : { "Ref" : "SSHLocation"}
+        } ]
+      }
+    },
+    "InstanceRole" : {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "Description": "Allows EC2 instance to access SystemsManager Role",
+        "RoleName": "metron_managed_ec2_SSM_role",
+        "ManagedPolicyArns":["arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM"],
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+              {
+                  "Effect": "Allow",
+                  "Principal": {
+                      "Service": "ec2.amazonaws.com"
+                  },
+                  "Action": "sts:AssumeRole"
+              }
+          ]
+        }
+      }
+    },
+    "InstanceProfile": {
+      "DependsOn" : ["InstanceRole"],
+      "Type":"AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Roles" : [{"Ref":"InstanceRole"}]
+      }
+    },
+    "EC2Instance" : {
+      "DependsOn" : ["InstanceSecurityGroup", "InstanceProfile"],
+      "Type" : "AWS::EC2::Instance",
+      "Properties" : {
+        "IamInstanceProfile":{"Ref": "InstanceProfile"},
+        "InstanceType" : {"Ref" : "InstanceType"},
+        "SecurityGroups" : [{"Ref" : "InstanceSecurityGroup"}],
+        "KeyName" : {"Ref" : "KeyName"},
+        "ImageId" : {"Ref": "LatestAmiId"},
+        "UserData": {
+          "Fn::Base64": {
+              "Fn::Join": [
+                  "",
+                  [
+                    "#!/bin/bash -x\n",
+                    "sudo yum update -y\n",
+                    "sudo yum install git -y\n",
+                    "sudo yum install docker -y\n",
+                    "sudo service docker start\n",
+                    "sudo usermod -a -G docker ec2-user\n",
+                    "sudo curl --silent --location https://rpm.nodesource.com/setup_16.x | bash\n",
+                    "sudo yum -y install nodejs\n",
+                    "npm update -g npm\n",
+                    "npm install nbb -g\n",
+                    "npm install aws-sdk -g\n",
+                    "echo 'aws s3 cp s3://metronbucket/metron_server_scripts . --recursive' >> download_scripts.sh\n",
+                    "chmod 0775 download_scripts.sh",
+                    "sudo systemctl enable amazon-ssm-agent\n",
+                    "sudo systemctl start amazon-ssm-agent"
+                  ]
+              ]
+          }
+        }
+      }
+    }
+  }
+}
