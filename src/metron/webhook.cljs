@@ -18,6 +18,14 @@
 
 ;; TODO where to put?
 
+(defn describe-stack []
+  "assumes single stack"
+  (with-promise out
+    (take! (cf/describe-stacks *stack-name*)
+      (fn [[err ok :as res]]
+        (if (some? err)
+          (put! out res)
+          (put! out [nil (get-in ok [:Stacks 0])]))))))
 
 (def stack-event-debugger
   (map (fn [[err ok :as res]]
@@ -39,10 +47,7 @@
      :TemplateBody (io/slurp (.join path *asset-path* "templates" "webhook.json"))
      :Parameters [keypair wh-secret wh-src]}))
 
-(defn create-stack
-  "returns [err] or stream of unique [nil event-map] until stack terminal stack
-   event in chronological order"
-  [arg]
+(defn create-stack [arg]
   (with-promise out
     (take! (kp/ensure-keypair arg)
       (fn [[err key-pair-name :as res]]
@@ -50,22 +55,54 @@
           (put! out res)
           (take! (cf/create-stack (stack-params key-pair-name))
             (fn [[err {sid :StackId :as ok} :as res]]
-              (println "Creating metron-stack " sid)
               (if err
                 (put! out res)
-                (take! (cf/observe-stack-creation sid)
-                  (fn [[err last-event :as res]]
-                    (if err
-                      (put! out res)
-                      (if (not= ["AWS::CloudFormation::Stack" "CREATE_COMPLETE"]
-                                ((juxt :ResourceType :ResourceStatus) last-event))
-                        (put! out [{:msg "Failed creating webhook stack"
-                                    ;;TODO retrieve actual cause
-                                    :last-event last-event}])
-                        (put! out res)))))))))))))
+                (do
+                  (println "Creating metron-stack " sid)
+                  (take! (cf/observe-stack-creation sid)
+                    (fn [[err last-event :as res]]
+                      (if err
+                        (put! out res)
+                        (if (not= ["AWS::CloudFormation::Stack" "CREATE_COMPLETE"]
+                                  ((juxt :ResourceType :ResourceStatus) last-event))
+                          (put! out [{:msg "Failed creating webhook stack"
+                                      ;;TODO retrieve actual cause
+                                      :last-event last-event}])
+                          (put! out res))))))))))))))
+
+(defn delete-stack [_]
+  (with-promise out
+    (take! (describe-stack)
+      (fn [[err {sid :StackId :as ok} :as res]]
+        (if err
+          (if (string/ends-with? (.-message err) "does not exist")
+            (put! out [nil])
+            (put! out res))
+          (take! (cf/delete-stack sid)
+            (fn [[err ok :as res]]
+              (if err
+                (put! out res)
+                (do
+                  (println "Deleting metron-stack " sid)
+                  (take! (cf/observe-stack-deletion sid)
+                    (fn [[err last-event :as res]]
+                      (if err
+                        (put! out res)
+                        (if (not= ["AWS::CloudFormation::Stack" "DELETE_COMPLETE"]
+                                  ((juxt :ResourceType :ResourceStatus) last-event))
+                          (put! out [{:msg "Failed deleting webhook stack"
+                                      ;;TODO retrieve actual cause
+                                      :last-event last-event}])
+                          (put! out res))))))))))))))
 
 (defn create-webhook [arg]
   (with-promise out
     (take! (create-stack arg)
+      (fn [[err ok :as res]]
+        (put! out res)))))
+
+(defn delete-webhook [arg]
+  (with-promise out
+    (take! (delete-stack arg)
       (fn [[err ok :as res]]
         (put! out res)))))

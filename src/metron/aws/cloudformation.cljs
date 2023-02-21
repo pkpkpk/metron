@@ -71,12 +71,12 @@
 
 (defn observe-stack-deletion [stack-name]
   (observe-stack-events stack-name
-                        #(string/starts-with? "DELETE" (:ResourceStatus %))
+                        #(string/starts-with? (:ResourceStatus %) "DELETE")
                         #{"DELETE_FAILED" "DELETE_COMPLETE"}))
 
 (defn observe-stack-update [stack-name]
   (observe-stack-events stack-name
-                        #(string/starts-with? "UPDATE" (:ResourceStatus %))
+                        #(string/starts-with? (:ResourceStatus %) "UPDATE")
                         #{"UPDATE_ROLLBACK_FAILED"
                           "UPDATE_ROLLBACK_COMPLETE"
                           "UPDATE_FAILED"

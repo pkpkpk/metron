@@ -85,7 +85,7 @@
       (go
        (let [[err ok :as res] (<! (case action
                                     ::create-webhook (wh/create-webhook opts)
-                                    ::delete-webhook (println arg)
+                                    ::delete-webhook (wh/delete-webhook opts)
                                     (to-chan! [[{:msg (str "umatched action: " (pr-str action))}]])))]
          (if err
            (exit 1 (str "\nError:\n\n" (pp err)))
