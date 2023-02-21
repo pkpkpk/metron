@@ -1,8 +1,9 @@
 (ns metron.aws.cloudformation
-  (:require-macros [metron.macros :refer [edn-res-chan]])
+  (:require-macros [metron.macros :refer [edn-res-chan with-promise]])
   (:require [cljs.core.async :refer [promise-chan put! chan close! take! go-loop <! timeout]]
             [clojure.string :as string]
-            [metron.aws :refer [AWS]]))
+            [metron.aws :refer [AWS]]
+            [metron.util :refer [dbg]]))
 
 (def CF (new (.-CloudFormation AWS) #js{:apiVersion "2010-05-15"}))
 
@@ -40,39 +41,33 @@
 
 (defn observe-stack-events
   "this will get events that have already happened... consumers need to discriminate"
-  [stack-name filter-fn end-states]
-  (let [out (chan 25)
-        _seen (atom #{})
-        ident (juxt :ResourceStatus :ResourceType)
-        _exit? (atom false)]
-    (go-loop [[err ok :as res] (<! (describe-stack-events stack-name))]
-      (if err
-        (do
-          (>! out res)
-          (close! out))
-        (do
-          (loop [stack (sort-by :Timestamp (filter (or filter-fn any?) (get ok :StackEvents)))]
-            (when-let [{resource :ResourceType,
-                        state :ResourceStatus, :as event} (first stack)]
+  [stack-arn filter-fn end-states]
+  (with-promise out
+    (let [_seen (atom #{})
+          ident (juxt :ResourceType :ResourceStatus)
+          _exit-event (atom false)]
+      (go-loop [[err ok :as res] (<! (describe-stack-events stack-arn))]
+        (if err
+          (put! out res)
+          (let [stack (sort-by :Timestamp (filter (or filter-fn any?) (get ok :StackEvents)))]
+            (doseq [{resource :ResourceType,
+                     state :ResourceStatus, :as event} stack]
               (when (and (= resource "AWS::CloudFormation::Stack")(end-states state))
-                ; (js/console.info "stack observation exit-condition met" state)
-                (reset! _exit? true))
+                (reset! _exit-event event))
               (when-not (@_seen (ident event))
                 (swap! _seen conj (ident event))
-                ; (js/console.info (select-keys event [:ResourceStatus :ResourceType]))
-                (>! out [nil event]))
-              (recur (rest stack))))
-          (if @_exit?
-            (close! out)
-            (do
-              (<! (timeout *poll-interval*))
-              (recur (<! (describe-stack-events stack-name))))))))
-        out))
+                (dbg (string/join " " (ident event)))))
+            (if @_exit-event
+              (put! out [nil @_exit-event])
+              (do
+                (<! (timeout *poll-interval*))
+                (recur (<! (describe-stack-events stack-arn)))))))))))
 
 (defn observe-stack-creation [stack-name]
   (observe-stack-events stack-name nil
                         #{"CREATE_COMPLETE" "CREATE_FAILED"
-                          "ROLLBACK_COMPLETE" "ROLLBACK_FAILED"}))
+                          "ROLLBACK_COMPLETE" "ROLLBACK_FAILED"
+                          "DELETE_FAILED" "DELETE_COMPLETE"}))
 
 (defn observe-stack-deletion [stack-name]
   (observe-stack-events stack-name

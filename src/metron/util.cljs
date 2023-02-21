@@ -10,7 +10,7 @@
 
 (defn dbg [& args]
   (when *debug*
-    (.apply (.-log js/console) js/console (into-array args))))
+    (apply println args)))
 
 (defn get-acknowledgment []
   (with-promise out
@@ -21,6 +21,8 @@
           (close! out))))))
 
 (defn yes-or-no [question]
-  (let [rl (.createInterface readline #js{:input (.-stdin js/process) :output (.-stdout js/process)})]
+  (let [rl (.createInterface readline
+                             #js{:input (.-stdin js/process)
+                                 :output (.-stdout js/process)})]
     (go-loop [])))
 

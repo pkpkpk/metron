@@ -3,6 +3,7 @@
   (:require [cljs.core.async :refer [go go-loop chan promise-chan put! take! close! >! <! to-chan!]]
             [cljs.nodejs :as nodejs]
             [cljs-node-io.core :as io]
+            [cljs.pprint :refer [pprint]]
             [clojure.string :as string]
             [clojure.tools.cli :refer [parse-opts]]
             [metron.aws :refer [AWS]]
@@ -11,6 +12,8 @@
             [metron.util :as util :refer [*debug*]]))
 
 (nodejs/enable-util-print!)
+
+(defn pp [x](with-out-str (pprint x)))
 
 (defn exit [status msg]
   (println msg)
@@ -63,23 +66,29 @@
        :exit-message (usage summary) :ok? true})))
 
 
-
 (defn -main [& args]
-  (let [{:keys [action options exit-message ok?] :as arg} (validate-args args)]
+  (let [{:keys [action opts exit-message ok?] :as arg} (validate-args args)]
     (println "\n===========================================================================")
     (js/console.log (pr-str arg))
     (println "===========================================================================\n")
-    (if (some? exit-message)
+    (cond
+      (nil? (goog.object.get (.-env js/process) "AWS_REGION"))
+      (exit 1 "please run with AWS_REGION set")
+
+      (some? exit-message)
       (exit (if ok? 0 1) exit-message)
-      (if (nil? action)
-        (exit 0 nil)
-        (go
-         (let [[err ok] (<! (case action
-                              ::create-webhook (wh/create-webhook arg)
-                              ::delete-webhook (println arg)
-                              (to-chan! [[{:msg (str "umatched action: " (pr-str action))}]])))]
-           (if err
-             (exit 1 err)
-             (exit 0 ok))))))))
+
+      (nil? action)
+      (exit 0 nil)
+
+      true
+      (go
+       (let [[err ok :as res] (<! (case action
+                                    ::create-webhook (wh/create-webhook opts)
+                                    ::delete-webhook (println arg)
+                                    (to-chan! [[{:msg (str "umatched action: " (pr-str action))}]])))]
+         (if err
+           (exit 1 (str "\nError:\n\n" (pp err)))
+           (exit 0 (str "\nSuccess:\n\n" (pp ok)))))))))
 
 (set! *main-cli-fn* -main)

@@ -23,7 +23,7 @@
   (map (fn [[err ok :as res]]
          (when *debug*
            (if err
-             (err err)
+             (dbg err)
              (dbg ((juxt :ResourceType :ResourceStatus) ok))))
          res)))
 
@@ -33,28 +33,39 @@
         wh-secret #js{"ParameterKey" "WebhookSecret"
                       "ParameterValue" *secret*}
         wh-src #js{"ParameterKey" "WebhookSrc"
-                   "ParameterValue" (io/slurp (.join *asset-path* "js" "lambda.js"))}]
+                   "ParameterValue" (io/slurp (.join path *asset-path* "js" "lambda.js"))}]
     {:StackName *stack-name*
      :Capabilities #js["CAPABILITY_IAM" "CAPABILITY_NAMED_IAM"]
-     :TemplateBody (io/slurp (.join *asset-path* "templates" "webhook.json"))
+     :TemplateBody (io/slurp (.join path *asset-path* "templates" "webhook.json"))
      :Parameters [keypair wh-secret wh-src]}))
 
 (defn create-stack
   "returns [err] or stream of unique [nil event-map] until stack terminal stack
    event in chronological order"
   [arg]
-  (let [out (chan 25 stack-event-debugger)] ;; TODO Do we really want all events???
+  (with-promise out
     (take! (kp/ensure-keypair arg)
       (fn [[err key-pair-name :as res]]
         (if err
-          (do (put! out res)(close! out))
+          (put! out res)
           (take! (cf/create-stack (stack-params key-pair-name))
-            (fn [[err ok :as res]]
+            (fn [[err {sid :StackId :as ok} :as res]]
+              (println "Creating metron-stack " sid)
               (if err
-                (do (put! out res)(close! out))
-                (pipe (cf/observe-stack-creation *stack-name*) out)))))))
-    out))
-
+                (put! out res)
+                (take! (cf/observe-stack-creation sid)
+                  (fn [[err last-event :as res]]
+                    (if err
+                      (put! out res)
+                      (if (not= ["AWS::CloudFormation::Stack" "CREATE_COMPLETE"]
+                                ((juxt :ResourceType :ResourceStatus) last-event))
+                        (put! out [{:msg "Failed creating webhook stack"
+                                    ;;TODO retrieve actual cause
+                                    :last-event last-event}])
+                        (put! out res)))))))))))))
 
 (defn create-webhook [arg]
-  (create-stack arg))
+  (with-promise out
+    (take! (create-stack arg)
+      (fn [[err ok :as res]]
+        (put! out res)))))

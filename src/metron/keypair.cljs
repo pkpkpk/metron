@@ -10,44 +10,47 @@
 
 (def path (js/require "path"))
 
-; (defn registered-keypairs []
-;   (with-promise out
-;     (ec2/describe-key-pairs key-pair-name)))
+(def ^:dynamic *key-pair-name* "metron")
+
+(defn keypath
+  ([](keypath ""))
+  ([base]
+   (.join path base (str *key-pair-name* ".pem"))))
 
 ;; TODO where to put?
 (defn spit-key-file
   ([data]
    (spit-key-file "" data))
   ([base data]
-   (io/spit (.join path base "metron.pem") data)))
+   (io/spit (keypath base) data)))
 
-(defn ensure-keypair [{:as arg}]
-  (to-chan! [[{:msg "some error"}]])
-  ; (with-promise out
-  ;   (take! (ec2/describe-key-pairs key-pair-name)
-  ;     (fn [[err ok :as res]]
-  ;       (if err
-  ;         (if-not (string/includes? (.-message err) "does not exist")
-  ;           (put! out res)
-  ;           (take! (ec2/create-key-pair key-pair-name)
-  ;             (fn [[err ok :as res]]
-  ;               (if err
-  ;                 (put! out res)
-  ;                 (do
-  ;                   (spit-key-file key-pair-name (.-KeyMaterial ok))
-  ;                   (put! out res))))))
-  ;         (do
-  ;           ;TODO ensure local pem, if not delete and make new one
-  ;           (assert (.exists (io/file (str key-pair-name ".pem"))))
-  ;           (put! out res))))))
-  )
+(defn key-is-registered? [key-name]
+  (with-promise out
+    (take! (ec2/describe-key-pairs key-name)
+      (fn [[err ok]]
+        (if err
+          (put! out (not (string/includes? (.-message err) "does not exist")))
+          (put! out true))))))
 
+;;TODO
+;; no key provided => make one
+;; key registered but not local => retrieve
+;; keypath provided but key doesn't exist => exit w/ err
+;; key provided but not registered => offer to importn
+;; (.exists (io/file (keypath)))
+(defn ensure-keypair
+  "ensure local metron.pem"
+  [{:as arg}]
+  (with-promise out
+    (take! (key-is-registered? *key-pair-name*)
+      (fn [yes?]
+        (if yes?
+          (put! out [nil *key-pair-name*])
+          (take! (ec2/create-key-pair *key-pair-name*)
+            (fn [[err ok :as res]]
+              (if err
+                (put! out res)
+                (do
+                  (spit-key-file (.-KeyMaterial ok))
+                  (put! out [nil *key-pair-name*]))))))))))
 
-;; no key provided
-;;  -- look for key metron.pem
-;;    -- if yes, ensure registered, carry on
-;;  -- generate && offer to install?
-;; key path provided but key doesn't exist=
-;;  -- exit & try again
-;; key provided but not registered
-;;; -- offer to import
