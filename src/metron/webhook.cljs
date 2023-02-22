@@ -7,8 +7,10 @@
             [metron.aws :refer [AWS]]
             [metron.aws.ec2 :as ec2]
             [metron.aws.cloudformation :as cf]
+            [metron.aws.ssm :as ssm]
             [metron.keypair :as kp]
-            [metron.util :refer [*debug* dbg]]))
+            [metron.bucket :refer [ensure-bucket]]
+            [metron.util :refer [*debug* dbg] :as util]))
 
 (def path (js/require "path"))
 
@@ -26,6 +28,8 @@
         (if (some? err)
           (put! out res)
           (put! out [nil (get-in ok [:Stacks 0])]))))))
+
+(def stack-status describe-stack)
 
 (def stack-event-debugger
   (map (fn [[err ok :as res]]
@@ -95,11 +99,91 @@
                                       :last-event last-event}])
                           (put! out res))))))))))))))
 
-(defn create-webhook [arg]
+(defn describe-instance []
+  "assumes single instance"
   (with-promise out
-    (take! (create-stack arg)
+    (take! (ec2/describe-instances)
       (fn [[err ok :as res]]
-        (put! out res)))))
+        (if (some? err)
+          (put! out res)
+          (put! out [nil (get-in ok [:Reservations 0 :Instances 0])]))))))
+
+(defn instance-id []
+  (with-promise out
+    (take! (describe-instance)
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (put! out [nil (get ok :InstanceId)]))))))
+
+(defn generate-deploy-key []
+  (with-promise out
+    (take! (instance-id)
+      (fn [[err iid :as res]]
+        (if err
+          (put! out res)
+          (let [script (io/slurp "assets/scripts/keygen.sh")]
+            (take! (ssm/run-script iid script)
+              (fn [[err ok :as res]]
+                (if err
+                  (put! out res)
+                  (put! out [nil (get ok :StandardOutputContent)]))))))))))
+
+(defn verify-deploy-key []
+  (with-promise out
+    (take! (instance-id)
+      (fn [[err instance :as res]]
+        (if err
+          (put! out res)
+          (take! (ssm/run-script instance "sudo -u ec2-user ssh -T git@github.com")
+            (fn [[err ok :as res]]
+              (println "verify result:" (pr-str res))
+              (put! out res))))))))
+
+#!==============================================================================
+
+(defn deploy-key-prompt [deploy-key]
+  (println "")
+  (println "1) go to https://github.com/<user>/<repo>/settings/keys")
+  (println "2) click 'Add deploy key'")
+  (println "3) enter everything between the lines into the text area")
+  (println "\n===========================================================================")
+  (println deploy-key)
+  (println "===========================================================================\n"))
+
+(defn configure-deploy-key [arg]
+  (println "generating deploy key on stack instance...")
+  (with-promise out
+    (take! (generate-deploy-key)
+      (fn [[err deploy-key :as res]]
+        (if err
+          (put! out res)
+          (go-loop []
+            (deploy-key-prompt deploy-key)
+            (<! (util/get-acknowledgment))
+            (let [[err ok] (<! (verify-deploy-key))]
+              (if (nil? err)
+                (do
+                  (println "deploy key succssfully configured")
+                  (put! out [nil]))
+                (do
+                  (println "deploy-key configuration failed, please try again")
+                  (recur))))))))))
+
+(defn create-webhook [arg]
+  (println "starting webhook creation")
+  (with-promise out
+    (take! (ensure-bucket arg)
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (take! (create-stack arg)
+            (fn [[err ok :as res]]
+              (if err
+                (put! out res)
+                (take! (configure-deploy-key arg)
+                  (fn [[:as res]]
+                    (put! out res)))))))))))
 
 (defn delete-webhook [arg]
   (with-promise out

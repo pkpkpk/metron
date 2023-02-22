@@ -83,7 +83,9 @@
 
       true
       (go
-       (let [[err ok :as res] (<! (case action
+       (let [opts (assoc opts :region (goog.object.get (.-env js/process) "AWS_REGION"))
+             _(println "region" (goog.object.get (.-env js/process) "AWS_REGION"))
+             [err ok :as res] (<! (case action
                                     ::create-webhook (wh/create-webhook opts)
                                     ::delete-webhook (wh/delete-webhook opts)
                                     (to-chan! [[{:msg (str "umatched action: " (pr-str action))}]])))]
