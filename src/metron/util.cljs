@@ -2,7 +2,14 @@
   (:require-macros [metron.macros :refer [with-promise]])
   (:require [cljs.core.async :refer [go go-loop chan promise-chan put! take! close! >! <!]]
             [cljs-node-io.core :as io]
+            [cljs.pprint :refer [pprint]]
             [clojure.string :as string]))
+
+(defn pp [x](with-out-str (pprint x)))
+
+(defn pipe1 [a b]
+  (take! a (fn [v] (put! b v)))
+  b)
 
 (def readline (js/require "readline"))
 

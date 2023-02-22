@@ -10,7 +10,7 @@
             [metron.aws.ssm :as ssm]
             [metron.keypair :as kp]
             [metron.bucket :refer [ensure-bucket]]
-            [metron.util :refer [*debug* dbg] :as util]))
+            [metron.util :refer [*debug* dbg pipe1] :as util]))
 
 (def path (js/require "path"))
 
@@ -67,12 +67,16 @@
                     (fn [[err last-event :as res]]
                       (if err
                         (put! out res)
-                        (if (not= ["AWS::CloudFormation::Stack" "CREATE_COMPLETE"]
+                        (if (= ["AWS::CloudFormation::Stack" "CREATE_COMPLETE"]
                                   ((juxt :ResourceType :ResourceStatus) last-event))
-                          (put! out [{:msg "Failed creating webhook stack"
-                                      ;;TODO retrieve actual cause
-                                      :last-event last-event}])
-                          (put! out res))))))))))))))
+                          (put! out res)
+                          (take! (cf/get-creation-failure sid)
+                            (fn [[err ok :as res]]
+                              (if err
+                                (put! out [{:msg "Failed retrieving creation failure"
+                                            :cause err}])
+                                (put! out [{:msg "Failed creating webhook stack"
+                                            :cause ok}])))))))))))))))))
 
 (defn delete-stack [_]
   (with-promise out
@@ -116,18 +120,15 @@
           (put! out res)
           (put! out [nil (get ok :InstanceId)]))))))
 
-(defn generate-deploy-key []
+
+(defn generate-deploy-key [iid]
   (with-promise out
-    (take! (instance-id)
-      (fn [[err iid :as res]]
-        (if err
-          (put! out res)
-          (let [script (io/slurp "assets/scripts/keygen.sh")]
-            (take! (ssm/run-script iid script)
-              (fn [[err ok :as res]]
-                (if err
-                  (put! out res)
-                  (put! out [nil (get ok :StandardOutputContent)]))))))))))
+    (let [script (io/slurp "assets/scripts/keygen.sh")]
+      (take! (ssm/run-script iid script)
+        (fn [[err ok :as res]]
+          (if err
+            (put! out res)
+            (put! out [nil (get ok :StandardOutputContent)])))))))
 
 (defn verify-deploy-key []
   (with-promise out
@@ -137,38 +138,51 @@
           (put! out res)
           (take! (ssm/run-script instance "sudo -u ec2-user ssh -T git@github.com")
             (fn [[err ok :as res]]
-              (println "verify result:" (pr-str res))
+              (println "verify result:" (util/pp res))
+              (println "")
               (put! out res))))))))
-
-#!==============================================================================
 
 (defn deploy-key-prompt [deploy-key]
   (println "")
-  (println "1) go to https://github.com/<user>/<repo>/settings/keys")
+  (println "1) go to https://github.com/:user/:repo/settings/keys")
   (println "2) click 'Add deploy key'")
   (println "3) enter everything between the lines into the text area")
   (println "\n===========================================================================")
   (println deploy-key)
   (println "===========================================================================\n"))
 
+(defn prompt-deploy-key-to-user [deploy-key]
+  (with-promise out
+    (go-loop []
+      (deploy-key-prompt deploy-key)
+      (<! (util/get-acknowledgment))
+      (let [[err ok] (<! (verify-deploy-key))]
+        (if (nil? err)
+          (do
+            (println "deploy key succssfully configured")
+            (put! out [nil]))
+          (do
+            (println "deploy-key configuration failed, please try again")
+            (recur)))))))
+
+; (defn wait-for-ok [iid]
+;   (println "Waiting for instance...")
+;   (set! (.-logger (.-config AWS)) js/console)
+;   (ec2/wait-for-ok iid))
+
 (defn configure-deploy-key [arg]
   (println "generating deploy key on stack instance...")
   (with-promise out
-    (take! (generate-deploy-key)
-      (fn [[err deploy-key :as res]]
+    (take! (instance-id)
+      (fn [[err iid :as res]]
         (if err
           (put! out res)
-          (go-loop []
-            (deploy-key-prompt deploy-key)
-            (<! (util/get-acknowledgment))
-            (let [[err ok] (<! (verify-deploy-key))]
-              (if (nil? err)
-                (do
-                  (println "deploy key succssfully configured")
-                  (put! out [nil]))
-                (do
-                  (println "deploy-key configuration failed, please try again")
-                  (recur))))))))))
+          ; (pipe1 (describe-instance) out)
+          (take! (generate-deploy-key iid)
+            (fn [[err deploy-key :as res]]
+              (if err
+                (put! out res)
+                (pipe1 (prompt-deploy-key-to-user deploy-key) out)))))))))
 
 (defn create-webhook [arg]
   (println "starting webhook creation")

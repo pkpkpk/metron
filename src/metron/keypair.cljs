@@ -22,7 +22,9 @@
   ([data]
    (spit-key-file "" data))
   ([base data]
-   (io/spit (keypath base) data)))
+   (let [dst (keypath base)]
+     (println "Writing ssh key to " dst)
+     (io/spit dst data))))
 
 (defn key-is-registered? [key-name]
   (with-promise out
@@ -33,10 +35,8 @@
           (put! out true))))))
 
 ;;TODO
-;; no key provided => make one
-;; key registered but not local => retrieve
-;; keypath provided but key doesn't exist => exit w/ err
-;; key provided but not registered => offer to importn
+;; key registered but not found locally => create new one
+;; key provided but not registered => offer to import
 ;; (.exists (io/file (keypath)))
 (defn ensure-keypair
   "ensure local metron.pem"

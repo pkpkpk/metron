@@ -9,11 +9,9 @@
             [metron.aws :refer [AWS]]
             [metron.aws.ec2 :as ec2]
             [metron.webhook :as wh]
-            [metron.util :as util :refer [*debug*]]))
+            [metron.util :as util :refer [*debug* pp]]))
 
 (nodejs/enable-util-print!)
-
-(defn pp [x](with-out-str (pprint x)))
 
 (defn exit [status msg]
   (println msg)

@@ -1,11 +1,8 @@
 (ns metron.aws.ssm
   (:require-macros [metron.macros :refer [edn-res-chan with-promise]])
   (:require [cljs.core.async :refer [promise-chan put! take! go-loop <! timeout]]
-            [metron.aws :refer [AWS]]))
-
-(defn pipe1 [a b]
-  (take! a (fn [v] (put! b v)))
-  b)
+            [metron.aws :refer [AWS]]
+            [metron.util :refer [pipe1]]))
 
 (def ^:dynamic *poll-interval* 3000)
 (def ^:dynamic *max-retries* 10)

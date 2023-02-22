@@ -28,3 +28,9 @@
 
 (defn describe-instances []
   (edn-res-chan (.describeInstances EC2 #js{}))) ;#js{:InstanceIds #js[]}
+
+(defn wait-for-running [iid]
+  (edn-res-chan (.waitFor EC2 "instanceRunning" #js{:InstanceIds #js[iid]})))
+
+(defn wait-for-ok [iid]
+  (edn-res-chan (.waitFor EC2 "instanceStatusOk" #js{:InstanceIds #js[iid]})))
