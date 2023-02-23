@@ -8,6 +8,7 @@
             [clojure.tools.cli :refer [parse-opts]]
             [metron.aws :refer [AWS]]
             [metron.aws.ec2 :as ec2]
+            [metron.keypair :as kp]
             [metron.webhook :as wh]
             [metron.util :as util :refer [*debug* pp]]))
 
@@ -29,7 +30,8 @@
    ; ["-v" "--verbose"]
    ; ["-k" "--keypath KEYPATH" "path to key" :default nil :parse-fn identity :validate [string?]]
    [nil "--create-webhook" "create webhook stack"]
-   [nil "--delete-webhook" "delete webhook stack"]])
+   [nil "--delete-webhook" "delete webhook stack"]
+   [nil "--gen-key" "generate metron.pem"]])
 
 (defn error-msg [errors] ;;TODO tailor error messages to optis
   (str "The following errors occurred while parsing your command:\n\n"
@@ -53,6 +55,10 @@
       (:delete-webhook options)
       {:action ::delete-webhook
        :opts (dissoc options :delete-webhook)}
+
+      (:gen-key options)
+      {:action ::gen-key
+       :opts (dissoc options :gen-key)}
 
       ;; custom validation on arguments
       ; (and (= 1 (count arguments)) (= "status" (first arguments)))
@@ -86,6 +92,7 @@
              [err ok :as res] (<! (case action
                                     ::create-webhook (wh/create-webhook opts)
                                     ::delete-webhook (wh/delete-webhook opts)
+                                    ::gen-key (kp/create-new)
                                     (to-chan! [[{:msg (str "umatched action: " (pr-str action))}]])))]
          (if err
            (exit 1 (str "\nError:\n\n" (pp err)))

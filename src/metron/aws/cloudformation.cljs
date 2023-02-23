@@ -89,5 +89,5 @@
         (if err
           (put! out res)
           (let [stack (get ok :StackEvents)
-                [target] (filter #(= (:ResourceStatus %) "CREATE_FAILED") stack)]
+                target (filter #(= (:ResourceStatus %) "CREATE_FAILED") stack)]
             (put! out [nil target])))))))

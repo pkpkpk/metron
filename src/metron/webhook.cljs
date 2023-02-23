@@ -18,8 +18,6 @@
 (def ^:dynamic *secret* "b38737a2784c7d961af45397eecfed95e98e24c81c7ab1fadbb8ed09341e") ;TODO
 (def ^:dynamic *asset-path* "assets")
 
-;; TODO where to put?
-
 (defn describe-stack []
   "assumes single stack"
   (with-promise out
@@ -112,35 +110,42 @@
           (put! out res)
           (put! out [nil (get-in ok [:Reservations 0 :Instances 0])]))))))
 
+(defn get-stack-outputs []
+  (with-promise out
+    (take! (describe-stack)
+      (fn [[err {:keys [Outputs] :as ok} :as res]]
+        ))))
+
 (defn instance-id []
   (with-promise out
-    (take! (describe-instance)
-      (fn [[err ok :as res]]
-        (if err
+    (take! (describe-stack)
+      (fn [[err {:keys [Outputs] :as ok} :as res]] ;; TODO outputs as map would be nice
+        (if (some? err)
           (put! out res)
-          (put! out [nil (get ok :InstanceId)]))))))
+          (let [s (filter #(= "InstanceId" (:OutputKey %)) Outputs)
+                iid (get (first s) :OutputValue)]
+            (put! out [nil iid])))))))
 
+
+#!==============================================================================
 
 (defn generate-deploy-key [iid]
   (with-promise out
-    (let [script (io/slurp "assets/scripts/keygen.sh")]
+    (let [script (io/slurp "assets/scripts/keygen2.sh")]
       (take! (ssm/run-script iid script)
         (fn [[err ok :as res]]
+          (println "keygen.sh res:" (util/pp res))
           (if err
             (put! out res)
             (put! out [nil (get ok :StandardOutputContent)])))))))
 
-(defn verify-deploy-key []
+(defn verify-deploy-key [iid]
   (with-promise out
-    (take! (instance-id)
-      (fn [[err instance :as res]]
-        (if err
-          (put! out res)
-          (take! (ssm/run-script instance "sudo -u ec2-user ssh -T git@github.com")
-            (fn [[err ok :as res]]
-              (println "verify result:" (util/pp res))
-              (println "")
-              (put! out res))))))))
+    (take! (ssm/run-script iid "sudo -u ec2-user ssh -i id_rsa -T git@github.com")
+      (fn [[{:keys [StandardErrorContent] :as err} ok :as res]]
+        (if (and err (string/includes? StandardErrorContent "successfully authenticated"))
+          (put! out [nil])
+          (put! out res))))))
 
 (defn deploy-key-prompt [deploy-key]
   (println "")
@@ -149,14 +154,14 @@
   (println "3) enter everything between the lines into the text area")
   (println "\n===========================================================================")
   (println deploy-key)
-  (println "===========================================================================\n"))
+  (print "===========================================================================\n"))
 
-(defn prompt-deploy-key-to-user [deploy-key]
+(defn prompt-deploy-key-to-user [iid deploy-key]
   (with-promise out
     (go-loop []
       (deploy-key-prompt deploy-key)
       (<! (util/get-acknowledgment))
-      (let [[err ok] (<! (verify-deploy-key))]
+      (let [[err ok] (<! (verify-deploy-key iid))]
         (if (nil? err)
           (do
             (println "deploy key succssfully configured")
@@ -165,11 +170,6 @@
             (println "deploy-key configuration failed, please try again")
             (recur)))))))
 
-; (defn wait-for-ok [iid]
-;   (println "Waiting for instance...")
-;   (set! (.-logger (.-config AWS)) js/console)
-;   (ec2/wait-for-ok iid))
-
 (defn configure-deploy-key [arg]
   (println "generating deploy key on stack instance...")
   (with-promise out
@@ -177,15 +177,20 @@
       (fn [[err iid :as res]]
         (if err
           (put! out res)
-          ; (pipe1 (describe-instance) out)
-          (take! (generate-deploy-key iid)
-            (fn [[err deploy-key :as res]]
+          (take! (do
+                   (println "Waiting for instance " iid)
+                   (ec2/wait-for-ok iid))
+            (fn [[err ok :as res]]
               (if err
                 (put! out res)
-                (pipe1 (prompt-deploy-key-to-user deploy-key) out)))))))))
+                (take! (generate-deploy-key iid)
+                  (fn [[err deploy-key :as res]]
+                    (if err
+                      (put! out res)
+                      (pipe1 (prompt-deploy-key-to-user iid deploy-key) out))))))))))))
 
 (defn create-webhook [arg]
-  (println "starting webhook creation")
+  (println "Starting webhook creation")
   (with-promise out
     (take! (ensure-bucket arg)
       (fn [[err ok :as res]]

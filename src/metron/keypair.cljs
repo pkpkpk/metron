@@ -6,25 +6,24 @@
             [cljs-node-io.core :as io]
             [metron.aws :refer [AWS]]
             [metron.aws.ec2 :as ec2]
-            [metron.util :refer [*debug* dbg]]))
+            [metron.util :refer [*debug* dbg pipe1 pp]]))
 
 (def path (js/require "path"))
 
-(def ^:dynamic *key-pair-name* "metron")
+(def ^:dynamic *key-pair-name* "metron_dev_kp")
 
 (defn keypath
   ([](keypath ""))
   ([base]
    (.join path base (str *key-pair-name* ".pem"))))
 
-;; TODO where to put?
 (defn spit-key-file
   ([data]
    (spit-key-file "" data))
   ([base data]
    (let [dst (keypath base)]
      (println "Writing ssh key to " dst)
-     (io/spit dst data))))
+     (io/spit dst data :mode 600))))
 
 (defn key-is-registered? [key-name]
   (with-promise out
@@ -33,6 +32,16 @@
         (if err
           (put! out (not (string/includes? (.-message err) "does not exist")))
           (put! out true))))))
+
+(defn create-new []
+  (with-promise out
+    (take! (ec2/create-key-pair *key-pair-name*)
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (do
+            (spit-key-file (:KeyMaterial ok))
+            (put! out [nil *key-pair-name*])))))))
 
 ;;TODO
 ;; key registered but not found locally => create new one
@@ -46,11 +55,5 @@
       (fn [yes?]
         (if yes?
           (put! out [nil *key-pair-name*])
-          (take! (ec2/create-key-pair *key-pair-name*)
-            (fn [[err ok :as res]]
-              (if err
-                (put! out res)
-                (do
-                  (spit-key-file (.-KeyMaterial ok))
-                  (put! out [nil *key-pair-name*]))))))))))
+          (pipe1 (create-new) out))))))
 
