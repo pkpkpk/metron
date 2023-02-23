@@ -15,7 +15,7 @@
 (nodejs/enable-util-print!)
 
 (defn exit [status msg]
-  (println msg)
+  (println msg) ;; TODO use stdout/stderr
   (.exit js/process status))
 
 (defn usage [options-summary]
@@ -28,10 +28,12 @@
 (def cli-options
   [["-h" "--help"]
    ; ["-v" "--verbose"]
-   ; ["-k" "--keypath KEYPATH" "path to key" :default nil :parse-fn identity :validate [string?]]
+   [nil "--status"]
    [nil "--create-webhook" "create webhook stack"]
    [nil "--delete-webhook" "delete webhook stack"]
-   [nil "--gen-key" "generate metron.pem"]])
+   ["-k" "--key-pair-name KEYPAIRNAME" "name of a SSH key registered with ec2"]
+   ; [nil "--gen-key" "generate metron.pem"]
+   ])
 
 (defn error-msg [errors] ;;TODO tailor error messages to optis
   (str "The following errors occurred while parsing your command:\n\n"
@@ -56,9 +58,9 @@
       {:action ::delete-webhook
        :opts (dissoc options :delete-webhook)}
 
-      (:gen-key options)
-      {:action ::gen-key
-       :opts (dissoc options :gen-key)}
+      (:status options)
+      {:action ::status
+       :opts (dissoc options :status)}
 
       ;; custom validation on arguments
       ; (and (= 1 (count arguments)) (= "status" (first arguments)))
@@ -70,11 +72,14 @@
        :exit-message (usage summary) :ok? true})))
 
 
+;;TODO enfore key-pair-name
+;;create secret
+
 (defn -main [& args]
   (let [{:keys [action opts exit-message ok?] :as arg} (validate-args args)]
-    (println "\n===========================================================================")
-    (js/console.log (pr-str arg))
-    (println "===========================================================================\n")
+    ; (println "\n===========================================================================")
+    ; (js/console.log (pr-str arg))
+    ; (println "===========================================================================\n")
     (cond
       (nil? (goog.object.get (.-env js/process) "AWS_REGION"))
       (exit 1 "please run with AWS_REGION set")
@@ -92,7 +97,7 @@
              [err ok :as res] (<! (case action
                                     ::create-webhook (wh/create-webhook opts)
                                     ::delete-webhook (wh/delete-webhook opts)
-                                    ::gen-key (kp/create-new)
+                                    ::status (wh/describe-stack)
                                     (to-chan! [[{:msg (str "umatched action: " (pr-str action))}]])))]
          (if err
            (exit 1 (str "\nError:\n\n" (pp err)))

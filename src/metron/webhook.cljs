@@ -14,20 +14,16 @@
 
 (def path (js/require "path"))
 
-(def ^:dynamic *stack-name* "metron-stack")
-(def ^:dynamic *secret* "b38737a2784c7d961af45397eecfed95e98e24c81c7ab1fadbb8ed09341e") ;TODO
 (def ^:dynamic *asset-path* "assets")
 
 (defn describe-stack []
   "assumes single stack"
   (with-promise out
-    (take! (cf/describe-stacks *stack-name*)
+    (take! (cf/describe-stacks "metron-stack")
       (fn [[err ok :as res]]
         (if (some? err)
           (put! out res)
           (put! out [nil (get-in ok [:Stacks 0])]))))))
-
-(def stack-status describe-stack)
 
 (def stack-event-debugger
   (map (fn [[err ok :as res]]
@@ -37,44 +33,40 @@
              (dbg ((juxt :ResourceType :ResourceStatus) ok))))
          res)))
 
-(defn stack-params [key-pair-name]
+(defn stack-params [key-pair-name secret]
   (let [keypair #js{"ParameterKey" "KeyName"
                     "ParameterValue" key-pair-name}
         wh-secret #js{"ParameterKey" "WebhookSecret"
-                      "ParameterValue" *secret*}
+                      "ParameterValue" secret}
         wh-src #js{"ParameterKey" "WebhookSrc"
                    "ParameterValue" (io/slurp (.join path *asset-path* "js" "lambda.js"))}]
-    {:StackName *stack-name*
+    {:StackName "metron-stack"
      :Capabilities #js["CAPABILITY_IAM" "CAPABILITY_NAMED_IAM"]
      :TemplateBody (io/slurp (.join path *asset-path* "templates" "webhook.json"))
      :Parameters [keypair wh-secret wh-src]}))
 
-(defn create-stack [arg]
+(defn create-stack [{:keys [key-pair-name secret] :as arg}]
   (with-promise out
-    (take! (kp/ensure-keypair arg)
-      (fn [[err key-pair-name :as res]]
+    (take! (cf/create-stack (stack-params key-pair-name secret))
+      (fn [[err {sid :StackId :as ok} :as res]]
         (if err
           (put! out res)
-          (take! (cf/create-stack (stack-params key-pair-name))
-            (fn [[err {sid :StackId :as ok} :as res]]
-              (if err
-                (put! out res)
-                (do
-                  (println "Creating metron-stack " sid)
-                  (take! (cf/observe-stack-creation sid)
-                    (fn [[err last-event :as res]]
-                      (if err
-                        (put! out res)
-                        (if (= ["AWS::CloudFormation::Stack" "CREATE_COMPLETE"]
-                                  ((juxt :ResourceType :ResourceStatus) last-event))
-                          (put! out res)
-                          (take! (cf/get-creation-failure sid)
-                            (fn [[err ok :as res]]
-                              (if err
-                                (put! out [{:msg "Failed retrieving creation failure"
-                                            :cause err}])
-                                (put! out [{:msg "Failed creating webhook stack"
-                                            :cause ok}])))))))))))))))))
+          (do
+            (println "Creating metron-stack " sid)
+            (take! (cf/observe-stack-creation sid)
+              (fn [[err last-event :as res]]
+                (if err
+                  (put! out res)
+                  (if (= ["AWS::CloudFormation::Stack" "CREATE_COMPLETE"]
+                         ((juxt :ResourceType :ResourceStatus) last-event))
+                    (put! out res)
+                    (take! (cf/get-creation-failure sid)
+                      (fn [[err ok :as res]]
+                        (if err
+                          (put! out [{:msg "Failed retrieving creation failure"
+                                      :cause err}])
+                          (put! out [{:msg "Failed creating webhook stack"
+                                      :cause ok}]))))))))))))))
 
 (defn delete-stack [_]
   (with-promise out
@@ -189,20 +181,26 @@
                       (put! out res)
                       (pipe1 (prompt-deploy-key-to-user iid deploy-key) out))))))))))))
 
-(defn create-webhook [arg]
-  (println "Starting webhook creation")
+(defn create-webhook [{:keys [key-pair-name] :as opts}]
   (with-promise out
-    (take! (ensure-bucket arg)
+    (take! (ensure-bucket opts)
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (take! (create-stack arg)
+          (take! (kp/validate-keypair key-pair-name)
             (fn [[err ok :as res]]
               (if err
                 (put! out res)
-                (take! (configure-deploy-key arg)
-                  (fn [[:as res]]
-                    (put! out res)))))))))))
+                (let [secret (util/random-string)]
+                  (println "Starting webhook creation")
+                  (take! (create-stack (assoc opts :secret secret))
+                    (fn [[err ok :as res]]
+                      (if err
+                        (put! out res)
+                        (take! (configure-deploy-key opts)
+                          (fn [[:as res]]
+                            (put! out res)))))))))))))))
+
 
 (defn delete-webhook [arg]
   (with-promise out

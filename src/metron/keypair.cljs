@@ -43,17 +43,18 @@
             (spit-key-file (:KeyMaterial ok))
             (put! out [nil *key-pair-name*])))))))
 
-;;TODO
+;;TODO ensure-keypair
 ;; key registered but not found locally => create new one
 ;; key provided but not registered => offer to import
 ;; (.exists (io/file (keypath)))
-(defn ensure-keypair
+
+(defn validate-keypair
   "ensure local metron.pem"
-  [{:as arg}]
+  [key-pair-name]
   (with-promise out
-    (take! (key-is-registered? *key-pair-name*)
+    (take! (key-is-registered? key-pair-name)
       (fn [yes?]
         (if yes?
-          (put! out [nil *key-pair-name*])
-          (pipe1 (create-new) out))))))
+          (put! out [nil])
+          (put! out [{:msg "please provide the name of a registered key-pair with option '-k <keyname>'"}]))))))
 

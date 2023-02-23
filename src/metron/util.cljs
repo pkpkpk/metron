@@ -27,9 +27,8 @@
           (.close rl)
           (close! out))))))
 
-(defn yes-or-no [question]
-  (let [rl (.createInterface readline
-                             #js{:input (.-stdin js/process)
-                                 :output (.-stdout js/process)})]
-    (go-loop [])))
 
+(def crypto (js/require "crypto"))
+
+(defn random-string []
+  (.toString (.randomBytes crypto 30) "hex"))
