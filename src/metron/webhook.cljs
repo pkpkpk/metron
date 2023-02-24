@@ -106,27 +106,29 @@
   (with-promise out
     (take! (describe-stack)
       (fn [[err {:keys [Outputs] :as ok} :as res]]
-        ))))
+        (let [m (into {}
+                      (map (fn [{:keys [OutputKey OutputValue]}]
+                             [(keyword OutputKey) OutputValue]))
+                      Outputs)]
+          (put! out [nil m]))))))
 
 (defn instance-id []
   (with-promise out
-    (take! (describe-stack)
-      (fn [[err {:keys [Outputs] :as ok} :as res]] ;; TODO outputs as map would be nice
+    (take! (get-stack-outputs)
+      (fn [[err {:keys [InstanceId] :as ok} :as res]]
         (if (some? err)
           (put! out res)
-          (let [s (filter #(= "InstanceId" (:OutputKey %)) Outputs)
-                iid (get (first s) :OutputValue)]
-            (put! out [nil iid])))))))
-
+          (put! out [nil InstanceId]))))))
 
 #!==============================================================================
 
 (defn generate-deploy-key [iid]
   (with-promise out
-    (let [script (io/slurp "assets/scripts/keygen2.sh")]
+    (let [script (io/slurp "assets/scripts/keygen.sh")]
+      (println "Generating deploy key on instance...")
       (take! (ssm/run-script iid script)
         (fn [[err ok :as res]]
-          (println "keygen.sh res:" (util/pp res))
+          ; (println "keygen.sh res:" (util/pp res))
           (if err
             (put! out res)
             (put! out [nil (get ok :StandardOutputContent)])))))))
@@ -156,7 +158,7 @@
       (let [[err ok] (<! (verify-deploy-key iid))]
         (if (nil? err)
           (do
-            (println "deploy key succssfully configured")
+            (println "Deploy-key successfully configured")
             (put! out [nil]))
           (do
             (println "deploy-key configuration failed, please try again")
@@ -181,6 +183,51 @@
                       (put! out res)
                       (pipe1 (prompt-deploy-key-to-user iid deploy-key) out))))))))))))
 
+
+(defn webhook-secret-prompt [{:keys [WebhookUrl secret] :as opts}]
+  (println "")
+  (println "1) go to https://github.com/:user/:repo/settings/hooks")
+  (println "2) click 'Add webhook'")
+  (println "3) In the 'Payload URL' field enter '" WebhookUrl "'")
+  (println "4) In the 'Content type' select menu choose 'application/json'")
+  (println "5) In the 'Secret' field enter (without quotes): '" secret "'")
+  (println "6) Choose 'Just the push event' and click Add webhook to finish")
+  (println ""))
+
+(defn verify-webhook-ping []
+  (with-promise out
+    (put! out [nil])))
+
+(defn prompt-webhook-secret-to-user [{ :as opts}]
+  (with-promise out
+    (go-loop []
+      (webhook-secret-prompt opts)
+      (<! (util/get-acknowledgment))
+      (let [[err ok] (<! (verify-webhook-ping))]
+        (if (nil? err)
+          (do
+            (println "Webhook ping received")
+            (put! out [nil]))
+          (do
+            (println "Failed to receive ping")
+            (println " - make sure there is no whitespace in secret")
+            (println " - remember to set payload content-type to application/json")
+            (recur)))))))
+
+(defn configure-webhook [{:keys [secret] :as opts}]
+  (with-promise out
+    (take! (get-stack-outputs)
+      (fn [[err {url :WebhookUrl :as outputs} :as res]]
+        (println "stack-outputs:" outputs)
+        (if err
+          (put! out res)
+          (pipe1 (prompt-webhook-secret-to-user (merge opts outputs)) out))))))
+
+; (defn update-webhook-cmd [])
+; (defn update-lambda [])
+; (defn stop-instance [])
+; (defn configure-git-remote [])
+
 (defn create-webhook [{:keys [key-pair-name] :as opts}]
   (with-promise out
     (take! (ensure-bucket opts)
@@ -191,16 +238,20 @@
             (fn [[err ok :as res]]
               (if err
                 (put! out res)
-                (let [secret (util/random-string)]
+                (let [secret (util/random-string)
+                      opts (assoc opts :secret secret)]
                   (println "Starting webhook creation")
-                  (take! (create-stack (assoc opts :secret secret))
+                  (take! (create-stack opts)
                     (fn [[err ok :as res]]
                       (if err
                         (put! out res)
                         (take! (configure-deploy-key opts)
-                          (fn [[:as res]]
-                            (put! out res)))))))))))))))
-
+                          (fn [[err ok :as res]]
+                            (if err
+                              (put! out res)
+                              (take! (configure-webhook opts)
+                                (fn [[err ok :as res]]
+                                  (put! out res))))))))))))))))))
 
 (defn delete-webhook [arg]
   (with-promise out

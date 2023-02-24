@@ -97,7 +97,11 @@
              [err ok :as res] (<! (case action
                                     ::create-webhook (wh/create-webhook opts)
                                     ::delete-webhook (wh/delete-webhook opts)
-                                    ::status (wh/describe-stack)
+                                    ::status (wh/describe-instance) ;;TODO cleanup, stack info too?
+                                    ;;TODO sleep
+                                    ;;stack-outputs
+                                    ;;update-webhook-cmd
+                                    ;;update-lambda-code
                                     (to-chan! [[{:msg (str "umatched action: " (pr-str action))}]])))]
          (if err
            (exit 1 (str "\nError:\n\n" (pp err)))
