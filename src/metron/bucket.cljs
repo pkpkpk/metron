@@ -2,10 +2,12 @@
   (:require-macros [metron.macros :refer [with-promise]])
   (:require [cljs.core.async :refer [promise-chan put! take!]]
             [clojure.string :as string]
-            [metron.aws.s3 :as s3]))
+            [metron.aws.s3 :as s3]
+            [metron.util :refer [pipe1]]))
 
 (def ^:dynamic *bucket-name* "metronbucket")
 
+;;TODO setup stack to import this
 (defn ensure-bucket [args]
   (with-promise out
     (take! (s3/head-bucket *bucket-name*)
@@ -15,6 +17,6 @@
           (if-not (string/includes? (str err) "NotFound")
             (put! out [{:msg "unrecognized s3/head-bucket error"
                         :cause err}])
-            (take! (s3/create-bucket *bucket-name* (:region args))
-              (fn [[err ok :as res]]
-                (put! out res)))))))))
+            (do
+              (println "Creating metron bucket")
+              (pipe1 (s3/create-bucket *bucket-name* (:region args)) out))))))))

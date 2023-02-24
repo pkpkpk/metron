@@ -34,3 +34,9 @@
 
 (defn wait-for-ok [iid]
   (edn-res-chan (.waitFor EC2 "instanceStatusOk" #js{:InstanceIds #js[iid]})))
+
+(defn describe-instance [iid]
+  (edn-res-chan (.describeInstances EC2 #js{:InstanceIds #js[iid]})))
+
+(defn stop-instance [iid]
+  (edn-res-chan (.stopInstances EC2 #js{:InstanceIds #js[iid]})))

@@ -31,6 +31,7 @@
    [nil "--status"]
    [nil "--create-webhook" "create webhook stack"]
    [nil "--delete-webhook" "delete webhook stack"]
+   [nil "--sleep" "ensure instance is stopped"]
    ["-k" "--key-pair-name KEYPAIRNAME" "name of a SSH key registered with ec2"]
    ; [nil "--gen-key" "generate metron.pem"]
    ])
@@ -62,6 +63,10 @@
       {:action ::status
        :opts (dissoc options :status)}
 
+      (:sleep options)
+      {:action ::sleep
+       :opts (dissoc options :sleep)}
+
       ;; custom validation on arguments
       ; (and (= 1 (count arguments)) (= "status" (first arguments)))
       ; {:action ::status :options options}
@@ -70,10 +75,6 @@
       {:action ::help
        :opts options
        :exit-message (usage summary) :ok? true})))
-
-
-;;TODO enfore key-pair-name
-;;create secret
 
 (defn -main [& args]
   (let [{:keys [action opts exit-message ok?] :as arg} (validate-args args)]
@@ -97,8 +98,8 @@
              [err ok :as res] (<! (case action
                                     ::create-webhook (wh/create-webhook opts)
                                     ::delete-webhook (wh/delete-webhook opts)
-                                    ::status (wh/describe-instance) ;;TODO cleanup, stack info too?
-                                    ;;TODO sleep
+                                    ::status (wh/instance-status)
+                                    ::sleep (wh/stop-instance)
                                     ;;stack-outputs
                                     ;;update-webhook-cmd
                                     ;;update-lambda-code

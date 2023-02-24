@@ -25,13 +25,39 @@
           (put! out res)
           (put! out [nil (get-in ok [:Stacks 0])]))))))
 
-(def stack-event-debugger
-  (map (fn [[err ok :as res]]
-         (when *debug*
-           (if err
-             (dbg err)
-             (dbg ((juxt :ResourceType :ResourceStatus) ok))))
-         res)))
+(defn get-stack-outputs []
+  (with-promise out
+    (take! (describe-stack)
+      (fn [[err {:keys [Outputs] :as ok} :as res]]
+        (let [m (into {}
+                      (map (fn [{:keys [OutputKey OutputValue]}]
+                             [(keyword OutputKey) OutputValue]))
+                      Outputs)]
+          (put! out [nil m]))))))
+
+(defn instance-id []
+  (with-promise out
+    (take! (get-stack-outputs)
+      (fn [[err {:keys [InstanceId] :as ok} :as res]]
+        (if (some? err)
+          (put! out res)
+          (put! out [nil InstanceId]))))))
+
+(defn instance-status []
+  (with-promise out
+    (take! (get-stack-outputs)
+      (fn [[err {:keys [InstanceId] :as ok} :as res]]
+        (if (some? err)
+          (put! out res)
+          (pipe1 (ec2/describe-instance InstanceId) out))))))
+
+(defn stop-instance []
+  (with-promise out
+    (take! (get-stack-outputs)
+      (fn [[err {:keys [InstanceId] :as ok} :as res]]
+        (if (some? err)
+          (put! out res)
+          (pipe1 (ec2/stop-instance InstanceId) out))))))
 
 (defn stack-params [key-pair-name secret]
   (let [keypair #js{"ParameterKey" "KeyName"
@@ -92,33 +118,6 @@
                                       ;;TODO retrieve actual cause
                                       :last-event last-event}])
                           (put! out res))))))))))))))
-
-(defn describe-instance []
-  "assumes single instance"
-  (with-promise out
-    (take! (ec2/describe-instances)
-      (fn [[err ok :as res]]
-        (if (some? err)
-          (put! out res)
-          (put! out [nil (get-in ok [:Reservations 0 :Instances 0])]))))))
-
-(defn get-stack-outputs []
-  (with-promise out
-    (take! (describe-stack)
-      (fn [[err {:keys [Outputs] :as ok} :as res]]
-        (let [m (into {}
-                      (map (fn [{:keys [OutputKey OutputValue]}]
-                             [(keyword OutputKey) OutputValue]))
-                      Outputs)]
-          (put! out [nil m]))))))
-
-(defn instance-id []
-  (with-promise out
-    (take! (get-stack-outputs)
-      (fn [[err {:keys [InstanceId] :as ok} :as res]]
-        (if (some? err)
-          (put! out res)
-          (put! out [nil InstanceId]))))))
 
 #!==============================================================================
 
@@ -225,7 +224,6 @@
 
 ; (defn update-webhook-cmd [])
 ; (defn update-lambda [])
-; (defn stop-instance [])
 ; (defn configure-git-remote [])
 
 (defn create-webhook [{:keys [key-pair-name] :as opts}]

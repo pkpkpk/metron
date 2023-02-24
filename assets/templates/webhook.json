@@ -58,6 +58,10 @@
     "PublicIP" : {
       "Description" : "Public IP address of the newly created EC2 instance",
       "Value" : { "Fn::GetAtt" : [ "EC2Instance", "PublicIp" ] }
+    },
+    "WebhookUrl" : {
+      "Description" : "Public http endpoint for github to call",
+      "Value" : { "Fn::GetAtt" : [ "WebhookUrl", "FunctionUrl" ] }
     }
   },
 
@@ -187,6 +191,11 @@
     "EC2Instance" : {
       "DependsOn" : ["InstanceSecurityGroup", "InstanceProfile"],
       "Type" : "AWS::EC2::Instance",
+      "CreationPolicy": {
+          "ResourceSignal": {
+              "Timeout": "PT5M"
+          }
+      },
       "Properties" : {
         "IamInstanceProfile":{"Ref": "InstanceProfile"},
         "InstanceType" : {"Ref" : "InstanceType"},
@@ -200,19 +209,24 @@
                   [
                     "#!/bin/bash -x\n",
                     "sudo yum update -y\n",
+                    "sudo yum install -y aws-cfn-bootstrap\n",
                     "sudo yum install git -y\n",
                     "sudo yum install docker -y\n",
                     "sudo service docker start\n",
                     "sudo usermod -a -G docker ec2-user\n",
-                    "sudo curl --silent --location https://rpm.nodesource.com/setup_16.x | bash\n",
-                    "sudo yum -y install nodejs\n",
-                    "npm update -g npm\n",
-                    "npm install nbb -g\n",
-                    "npm install aws-sdk -g\n",
-                    "echo 'aws s3 cp s3://metronbucket/metron_server_scripts . --recursive' >> download_scripts.sh\n",
-                    "chmod 0775 download_scripts.sh",
                     "sudo systemctl enable amazon-ssm-agent\n",
-                    "sudo systemctl start amazon-ssm-agent"
+                    "sudo systemctl start amazon-ssm-agent\n",
+                    "/opt/aws/bin/cfn-signal -e $? ",
+                    "         --stack ",
+                    {
+                        "Ref": "AWS::StackName"
+                    },
+                    "         --resource EC2Instance ",
+                    "         --region ",
+                    {
+                        "Ref": "AWS::Region"
+                    },
+                    "\n"
                   ]
               ]
           }
