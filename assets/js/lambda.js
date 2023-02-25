@@ -1,11 +1,12 @@
 var secret = process.env.WEBHOOK_SECRET;
 var region = process.env.REGION;
 var instanceId = process.env.INSTANCE_ID;
-var command = process.env.COMMAND;
 
 var crypto = require("crypto");
-var ec2 = require("@aws-sdk/client-ec2");
-var ssm = require("@aws-sdk/client-ssm");
+const { SSMClient, StartSessionCommand, SendCommandCommand } = require('@aws-sdk/client-ssm');
+const ec2 = require("@aws-sdk/client-ec2");
+const ec2Client = new ec2.EC2Client({ region });
+const ssm = new SSMClient();
 
 function verify_signature(body, request_sig){
     var HMAC = crypto.createHmac("sha256", secret);
@@ -38,15 +39,6 @@ async function waitForInstanceRunning() {
   }
 }
 
-var ssm_params = {
-  DocumentName: "AWS-RunShellScript",
-  InstanceIds: [instanceId],
-  OutputS3BucketName: "metronbucket",
-  Parameters: {
-    commands: [command],
-    workingDirectory: ["/home/ec2-user"]
-  }
-};
 
 exports.handler = async(event, _ctx) => {
     var signature = event.headers["x-hub-signature-256"];
@@ -55,18 +47,35 @@ exports.handler = async(event, _ctx) => {
     if (!is_verified) {
       return {statusCode: 401, body: "bad signature"};
     } else {
-      //TODO look for ping
+
       try {
         await waitForInstanceRunning();
-        const ssmClient = new ssm.SSMClient({ region });
-        console.log("calling ssm");
-        var body = JSON.parse(event.body);
-        ssm_params.OutputS3KeyPrefix = body.repository.name;
+        const startSessionCommand = new StartSessionCommand({Target: instanceId});
+        const startSessionData = await ssm.send(startSessionCommand);
+        const sessionId = startSessionData.SessionId;
+        console.log('SSM session started successfully:', sessionId);
 
-        ssmClient.send(new ssm.SendCommandCommand(ssm_params));
-        return {statusCode: 200, body: "command sent"}
-        // var cmd = await ssmClient.send(new ssm.SendCommandCommand(ssm_params));
-        // return {statusCode: 200, body: cmd};
+        var cmd;
+
+        if (ev.headers["x-github-event"] == "ping") {
+          cmd = `printf '%s' '${JSON.stringify(event)}' | aws s3 cp - s3://metronbucket/PONG.json`;
+        } else {
+          cmd = `printf '%s' '${JSON.stringify(event)}' | aws s3 cp - s3://metronbucket/event.json`;
+        }
+
+        const sendCommandParams = {
+          DocumentName: 'AWS-RunShellScript',
+          Parameters: {
+            commands: [ cmd, 'shutdown -h now']
+          },
+          Targets: [{Key: 'InstanceIds', Values: [instanceId]}]
+        };
+
+        const sendCommandCommand = new SendCommandCommand(sendCommandParams);
+        const sendCommandData = await ssm.send(sendCommandCommand);
+        const commandId = sendCommandData.Command.CommandId;
+        console.log('SSM command executed successfully:', commandId);
+        return {statusCode: 200, body: JSON.stringify(event)}
       } catch (err) {
         return {
           statusCode: 500,

@@ -20,3 +20,12 @@
             (do
               (println "Creating metron bucket")
               (pipe1 (s3/create-bucket *bucket-name* (:region args)) out))))))))
+
+(defn ensure-no-pong []
+  (with-promise out
+    (take! (s3/delete-object *bucket-name* "PONG.json")
+      (fn [[err :as res]] ; "NoSuchKey"
+        (put! out [nil])))))
+
+(defn wait-for-pong []
+  (s3/wait-for-exists "PONG.json"))

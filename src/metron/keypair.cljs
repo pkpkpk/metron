@@ -50,9 +50,11 @@
   "ensure local metron.pem"
   [key-pair-name]
   (with-promise out
-    (take! (key-is-registered? key-pair-name)
-      (fn [yes?]
-        (if yes?
-          (put! out [nil])
-          (put! out [{:msg "please provide the name of a registered key-pair with option '-k <keyname>'"}]))))))
+    (if (nil? key-pair-name)
+      (put! out [{:msg "please provide the name of a registered key-pair with option '-k <keyname>'"}])
+      (take! (key-is-registered? key-pair-name)
+        (fn [yes?]
+          (if yes?
+            (put! out [nil])
+            (put! out [{:msg "please provide the name of a registered key-pair with option '-k <keyname>'"}])))))))
 

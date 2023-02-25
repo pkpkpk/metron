@@ -9,7 +9,7 @@
             [metron.aws.cloudformation :as cf]
             [metron.aws.ssm :as ssm]
             [metron.keypair :as kp]
-            [metron.bucket :refer [ensure-bucket]]
+            [metron.bucket :refer [ensure-bucket] :as bkt]
             [metron.util :refer [*debug* dbg pipe1] :as util]))
 
 (def path (js/require "path"))
@@ -57,7 +57,9 @@
       (fn [[err {:keys [InstanceId] :as ok} :as res]]
         (if (some? err)
           (put! out res)
-          (pipe1 (ec2/stop-instance InstanceId) out))))))
+          (if (some? InstanceId)
+            (pipe1 (ec2/stop-instance InstanceId) out)
+            (put! out [nil])))))))
 
 (defn stack-params [key-pair-name secret]
   (let [keypair #js{"ParameterKey" "KeyName"
@@ -118,6 +120,9 @@
                                       ;;TODO retrieve actual cause
                                       :last-event last-event}])
                           (put! out res))))))))))))))
+
+; (defn update-webhook-cmd [])
+; (defn update-lambda [])
 
 #!==============================================================================
 
@@ -194,21 +199,20 @@
   (println ""))
 
 (defn verify-webhook-ping []
-  (with-promise out
-    (put! out [nil])))
+  (bkt/wait-for-pong))
 
 (defn prompt-webhook-secret-to-user [{ :as opts}]
   (with-promise out
     (go-loop []
       (webhook-secret-prompt opts)
       (<! (util/get-acknowledgment))
-      (let [[err ok] (<! (verify-webhook-ping))]
+      (let [[err ok :as res] (<! (verify-webhook-ping))]
         (if (nil? err)
           (do
-            (println "Webhook ping received")
-            (put! out [nil]))
+            (println "Webhook ping successfully processed!")
+            (put! out res))
           (do
-            (println "Failed to receive ping")
+            (println "Failed to process ping: " (.-message err))
             (println " - make sure there is no whitespace in secret")
             (println " - remember to set payload content-type to application/json")
             (recur)))))))
@@ -217,14 +221,16 @@
   (with-promise out
     (take! (get-stack-outputs)
       (fn [[err {url :WebhookUrl :as outputs} :as res]]
-        (println "stack-outputs:" outputs)
         (if err
           (put! out res)
-          (pipe1 (prompt-webhook-secret-to-user (merge opts outputs)) out))))))
+          (take! (bkt/ensure-no-pong)
+            (fn [[err ok]]
+              (pipe1 (prompt-webhook-secret-to-user (merge opts outputs)) out))))))))
 
-; (defn update-webhook-cmd [])
-; (defn update-lambda [])
-; (defn configure-git-remote [])
+(defn configure-git-remote [pong-event {:as opts}]
+  (println "configuring as remote git repository...")
+  (with-promise out
+    (put! out [nil])))
 
 (defn create-webhook [{:keys [key-pair-name] :as opts}]
   (with-promise out
@@ -232,13 +238,13 @@
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (take! (kp/validate-keypair key-pair-name)
+          (take! (do (println "metronbucket OK")
+                     (kp/validate-keypair key-pair-name))
             (fn [[err ok :as res]]
               (if err
                 (put! out res)
-                (let [secret (util/random-string)
-                      opts (assoc opts :secret secret)]
-                  (println "Starting webhook creation")
+                (let [opts (assoc opts :secret (util/random-string))]
+                  (println "key-pair OK")
                   (take! (create-stack opts)
                     (fn [[err ok :as res]]
                       (if err
@@ -248,8 +254,12 @@
                             (if err
                               (put! out res)
                               (take! (configure-webhook opts)
-                                (fn [[err ok :as res]]
-                                  (put! out res))))))))))))))))))
+                                (fn [[err pong-event :as res]]
+                                  (if err
+                                    (put! out res)
+                                    (take! (configure-git-remote pong-event opts)
+                                      (fn [[err ok :as res]]
+                                        (put! out res)))))))))))))))))))))
 
 (defn delete-webhook [arg]
   (with-promise out

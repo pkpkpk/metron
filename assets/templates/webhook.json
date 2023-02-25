@@ -102,6 +102,10 @@
                     "Effect": "Allow",
                     "Action": [
                         "ssm:SendCommand",
+                        "ssm:TerminateSession",
+                        "ssm:StartSession",
+                        "ssm:ResumeSession",
+                        "ssm:DescribeSessions",
                         "ec2:*"
                     ],
                     "Resource": "*"

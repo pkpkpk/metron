@@ -34,5 +34,12 @@
 
 (defn get-object
   [bucket-name key]
-  (edn-res-chan (.getObject S3 #js{:Bucket bucket-name
-                                   :Key key})))
+  (edn-res-chan (.getObject S3 #js{:Bucket bucket-name :Key key})))
+
+(defn delete-object
+  [bucket-name key]
+  (edn-res-chan (.deleteObject S3 #js{:Bucket bucket-name :Key key})))
+
+(defn wait-for-exists
+  [bucket-name key]
+  (edn-res-chan (.waitFor S3 "objectExists" #js{:Bucket bucket-name :Key key})))
