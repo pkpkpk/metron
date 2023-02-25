@@ -28,4 +28,4 @@
         (put! out [nil])))))
 
 (defn wait-for-pong []
-  (s3/wait-for-exists "PONG.json"))
+  (s3/wait-for-exists *bucket-name* "PONG.json"))

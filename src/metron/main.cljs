@@ -96,7 +96,8 @@
        (let [opts (assoc opts :region (goog.object.get (.-env js/process) "AWS_REGION"))
              _(println "region" (goog.object.get (.-env js/process) "AWS_REGION"))
              [err ok :as res] (<! (case action
-                                    ::create-webhook (wh/create-webhook opts)
+                                    ::create-webhook (wh/create-webhook-stack opts)
+                                    ; ::configure-webhook
                                     ::delete-webhook (wh/delete-webhook opts)
                                     ::status (wh/instance-status)
                                     ::sleep (wh/stop-instance)

@@ -217,22 +217,34 @@
             (println " - remember to set payload content-type to application/json")
             (recur)))))))
 
-(defn configure-webhook [{:keys [secret] :as opts}]
-  (with-promise out
-    (take! (get-stack-outputs)
-      (fn [[err {url :WebhookUrl :as outputs} :as res]]
-        (if err
-          (put! out res)
-          (take! (bkt/ensure-no-pong)
-            (fn [[err ok]]
-              (pipe1 (prompt-webhook-secret-to-user (merge opts outputs)) out))))))))
-
 (defn configure-git-remote [pong-event {:as opts}]
   (println "configuring as remote git repository...")
   (with-promise out
     (put! out [nil])))
 
-(defn create-webhook [{:keys [key-pair-name] :as opts}]
+(defn configure-webhook [{:keys [secret] :as opts}]
+  (with-promise out
+    (take! (configure-deploy-key opts)
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (take! (get-stack-outputs)
+            (fn [[err {url :WebhookUrl :as outputs} :as res]]
+              (if err
+                (put! out res)
+                (take! (bkt/ensure-no-pong)
+                  (fn [[err ok :as res]]
+                    (if err
+                      (put! out res)
+                      (take! (prompt-webhook-secret-to-user (merge opts outputs))
+                        (fn [[err pong-event :as res]]
+                          (if err
+                            (put! out res)
+                            (take! (configure-git-remote pong-event opts)
+                              (fn [[err ok :as res]]
+                                (put! out res)))))))))))))))))
+
+(defn create-webhook-stack [{:keys [key-pair-name] :as opts}]
   (with-promise out
     (take! (ensure-bucket opts)
       (fn [[err ok :as res]]
@@ -243,23 +255,14 @@
             (fn [[err ok :as res]]
               (if err
                 (put! out res)
-                (let [opts (assoc opts :secret (util/random-string))]
-                  (println "key-pair OK")
+                (let [_(println "key-pair OK")
+                      opts (assoc opts :secret (util/random-string))]
+                  ;; store secret on s3 so can resume config / add new repo
                   (take! (create-stack opts)
                     (fn [[err ok :as res]]
                       (if err
                         (put! out res)
-                        (take! (configure-deploy-key opts)
-                          (fn [[err ok :as res]]
-                            (if err
-                              (put! out res)
-                              (take! (configure-webhook opts)
-                                (fn [[err pong-event :as res]]
-                                  (if err
-                                    (put! out res)
-                                    (take! (configure-git-remote pong-event opts)
-                                      (fn [[err ok :as res]]
-                                        (put! out res)))))))))))))))))))))
+                        (configure-webhook opts)))))))))))))
 
 (defn delete-webhook [arg]
   (with-promise out
