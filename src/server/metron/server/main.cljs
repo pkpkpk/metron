@@ -10,11 +10,11 @@
             [metron.aws.ec2 :as ec2]
             [metron.util :as util :refer [*debug* pp]]))
 
-
 (nodejs/enable-util-print!)
 
+(def foo 42)
+
 (defn -main [event-json]
-  (let [])
-  )
+  (let []))
 
 (set! *main-cli-fn* -main)

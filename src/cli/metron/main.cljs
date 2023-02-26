@@ -6,7 +6,6 @@
             [cljs.pprint :refer [pprint]]
             [clojure.string :as string]
             [clojure.tools.cli :refer [parse-opts]]
-            [metron.aws :refer [AWS]]
             [metron.aws.ec2 :as ec2]
             [metron.keypair :as kp]
             [metron.webhook :as wh]
