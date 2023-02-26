@@ -14,9 +14,14 @@
 
 (nodejs/enable-util-print!)
 
-(defn exit [status msg]
-  (println msg) ;; TODO use stdout/stderr
-  (.exit js/process status))
+(defn exit [status data]
+  (let [msg (or (and (map? data)
+                     (get data :msg))
+                (pp data))]
+    (if (zero? status)
+      (.write (.-stdout js/process) msg)
+      (.write (.-stderr js/process) msg))
+    (.exit js/process status)))
 
 (defn usage [options-summary]
   (->> ["Usage: node metron.js [options]*"
@@ -32,7 +37,11 @@
    [nil "--stack-status" "get description of stack state"]
    [nil "--create-webhook" "create webhook stack"]
    [nil "--delete-webhook" "delete webhook stack"]
+   [nil "--configure-webhook" "add/edit webhook with existing stack"]
+   [nil "--start" "start instance"]
    [nil "--sleep" "ensure instance is stopped"]
+   [nil "--stop" "ensure instance is stopped"]
+   [nil "--ssh" "return ssh dst into instance. without elastic-ip configured, changes every start/stop cycle"]
    ["-k" "--key-pair-name KEYPAIRNAME" "name of a SSH key registered with ec2"]
    ; [nil "--gen-key" "generate metron.pem"]
    ])
@@ -68,9 +77,26 @@
       {:action ::stack-status
        :opts (dissoc options :stack-status)}
 
+      (:start options)
+      {:action ::start
+       :opts (dissoc options :start)}
+
       (:sleep options)
       {:action ::sleep
        :opts (dissoc options :sleep)}
+
+      (:stop options)
+      {:action ::stop
+       :opts (dissoc options :stop)}
+
+      (:configure-webhook options)
+      {:action ::configure-webhook
+       :opts (dissoc options :configure-webhook)}
+
+      (:ssh options)
+      {:action ::ssh
+       :opts (dissoc options :ssh)}
+
 
       ;; custom validation on arguments
       ; (and (= 1 (count arguments)) (= "status" (first arguments)))
@@ -83,9 +109,6 @@
 
 (defn -main [& args]
   (let [{:keys [action opts exit-message ok?] :as arg} (validate-args args)]
-    ; (println "\n===========================================================================")
-    ; (js/console.log (pr-str arg))
-    ; (println "===========================================================================\n")
     (cond
       (nil? (goog.object.get (.-env js/process) "AWS_REGION"))
       (exit 1 "please run with AWS_REGION set")
@@ -99,20 +122,22 @@
       true
       (go
        (let [opts (assoc opts :region (goog.object.get (.-env js/process) "AWS_REGION"))
-             _(println "region" (goog.object.get (.-env js/process) "AWS_REGION"))
              [err ok :as res] (<! (case action
                                     ::create-webhook (wh/create-webhook-stack opts)
-                                    ; ::configure-webhook
+                                    ::configure-webhook (wh/configure-webhook)
                                     ::delete-webhook (wh/delete-webhook opts)
                                     ::status (wh/instance-status)
                                     ::stack-status (wh/describe-stack)
+                                    ::start (wh/wait-for-instance)
+                                    ::stop (wh/stop-instance)
                                     ::sleep (wh/stop-instance)
+                                    ::ssh (wh/ssh-address)
                                     ;;stack-outputs
                                     ;;update-webhook-cmd
                                     ;;update-lambda-code
                                     (to-chan! [[{:msg (str "umatched action: " (pr-str action))}]])))]
          (if err
-           (exit 1 (str "\nError:\n\n" (pp err)))
-           (exit 0 (str "\nSuccess:\n\n" (pp ok)))))))))
+           (exit 1 err)
+           (exit 0 ok)))))))
 
 (set! *main-cli-fn* -main)

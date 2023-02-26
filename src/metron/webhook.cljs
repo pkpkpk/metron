@@ -49,7 +49,37 @@
       (fn [[err {:keys [InstanceId] :as ok} :as res]]
         (if (some? err)
           (put! out res)
-          (pipe1 (ec2/describe-instance InstanceId) out))))))
+          (take! (ec2/describe-instance InstanceId)
+            (fn [[err ok :as res]]
+              (if err
+                (put! out res)
+                (put! out [nil (get-in ok [:Reservations 0 :Instances 0])])))))))))
+
+(defn wait-for-instance
+  ([]
+   (with-promise out
+     (take! (get-stack-outputs)
+       (fn [[err {:keys [InstanceId] :as ok} :as res]]
+         (if err
+           (put! out res)
+           (pipe1 out (wait-for-instance InstanceId)))))))
+  ([iid]
+   (with-promise out
+     (take! (ec2/start-instance iid)
+       (fn [_]
+         (println "Waiting for instance " iid)
+         (pipe1 (ec2/wait-for-ok iid) out))))))
+
+(defn ssh-address []
+  (with-promise out
+    (take! (instance-status)
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (if-not (= "running" (get-in ok [:State :Name]))
+            (put! out [{:msg "Instance is not running!"}])
+            (let [public-dns (get ok :PublicDnsName)]
+              (put! out [nil (str "ec2-user@" public-dns)]))))))))
 
 (defn stop-instance []
   (with-promise out
@@ -168,31 +198,26 @@
             (println "deploy-key configuration failed, please try again")
             (recur)))))))
 
-(defn configure-deploy-key [{:as opts}]
-  (println "generating deploy key on stack instance...")
+(defn configure-deploy-key [{iid :InstanceId, :as opts}]
+  (assert (some? iid))
+  (println "retrieving deploy-key from stack instance...")
   (with-promise out
-    (take! (instance-id)
-      (fn [[err iid :as res]]
+    (take! (wait-for-instance iid)
+      (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (take! (do
-                   (println "Waiting for instance " iid)
-                   (ec2/wait-for-ok iid))
-            (fn [[err ok :as res]]
+          (take! (generate-deploy-key iid)
+            (fn [[err deploy-key :as res]]
               (if err
                 (put! out res)
-                (take! (generate-deploy-key iid)
-                  (fn [[err deploy-key :as res]]
-                    (if err
-                      (put! out res)
-                      (pipe1 (prompt-deploy-key-to-user iid deploy-key) out))))))))))))
-
+                (pipe1 (prompt-deploy-key-to-user iid deploy-key) out)))))))))
 
 (defn webhook-secret-prompt [{:keys [WebhookUrl WebhookSecret] :as opts}]
   (println "")
   (println "1) go to https://github.com/:user/:repo/settings/hooks")
   (println "2) click 'Add webhook'")
   (println "3) In the 'Payload URL' field enter '" WebhookUrl "'")
+  ; ?branch=metron
   (println "4) In the 'Content type' select menu choose 'application/json'")
   (println "5) In the 'Secret' field enter (without quotes): '" WebhookSecret "'")
   (println "6) Choose 'Just the push event' and click Add webhook to finish")
@@ -226,8 +251,9 @@
    (with-promise out
      (take! (get-stack-outputs)
        (fn [[err ok :as res]]
-         (if err (put! out res))
-         (pipe1 (configure-webhook ok) out)))))
+         (if err
+           (put! out res)
+           (pipe1 (configure-webhook ok) out))))))
   ([{:keys [WebhookSecret WebhookUrl] :as opts}]
    (assert (string? WebhookSecret))
    (assert (not (string/blank? WebhookSecret)))

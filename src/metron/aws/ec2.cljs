@@ -40,3 +40,6 @@
 
 (defn stop-instance [iid]
   (edn-res-chan (.stopInstances EC2 #js{:InstanceIds #js[iid]})))
+
+(defn start-instance [iid]
+  (edn-res-chan (.startInstances EC2 #js{:InstanceIds #js[iid]})))

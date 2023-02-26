@@ -57,6 +57,8 @@ exports.handler = async(event, _ctx) => {
 
         var cmd;
 
+        event.body = JSON.parse(event.body);
+
         if (event.headers["x-github-event"] == "ping") {
           cmd = `printf '%s' '${JSON.stringify(event)}' | aws s3 cp - s3://metronbucket/PONG.json`;
         } else {
