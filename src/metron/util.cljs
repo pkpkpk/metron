@@ -22,7 +22,7 @@
 (defn get-acknowledgment []
   (with-promise out
     (let [rl (.createInterface readline #js{:input (.-stdin js/process) :output (.-stdout js/process)})]
-      (.question rl "hit any key continue"
+      (.question rl "hit any key to continue"
         (fn [answer]
           (.close rl)
           (close! out))))))

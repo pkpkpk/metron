@@ -47,6 +47,7 @@
       "Description" : "InstanceId of the newly created EC2 instance",
       "Value" : { "Ref" : "EC2Instance" }
     },
+    "KeyName": {"Value" : {"Ref" : "KeyName"}},
     "AZ" : {
       "Description" : "Availability Zone of the newly created EC2 instance",
       "Value" : { "Fn::GetAtt" : [ "EC2Instance", "AvailabilityZone" ] }
@@ -62,7 +63,8 @@
     "WebhookUrl" : {
       "Description" : "Public http endpoint for github to call",
       "Value" : { "Fn::GetAtt" : [ "WebhookUrl", "FunctionUrl" ] }
-    }
+    },
+    "WebhookSecret": {"Value" : {"Ref" : "WebhookSecret"}}
   },
 
   "Resources" : {

@@ -28,7 +28,8 @@
 (def cli-options
   [["-h" "--help"]
    ; ["-v" "--verbose"]
-   [nil "--status"]
+   [nil "--status" "get description of instance state"]
+   [nil "--stack-status" "get description of stack state"]
    [nil "--create-webhook" "create webhook stack"]
    [nil "--delete-webhook" "delete webhook stack"]
    [nil "--sleep" "ensure instance is stopped"]
@@ -62,6 +63,10 @@
       (:status options)
       {:action ::status
        :opts (dissoc options :status)}
+
+      (:stack-status options)
+      {:action ::stack-status
+       :opts (dissoc options :stack-status)}
 
       (:sleep options)
       {:action ::sleep
@@ -100,6 +105,7 @@
                                     ; ::configure-webhook
                                     ::delete-webhook (wh/delete-webhook opts)
                                     ::status (wh/instance-status)
+                                    ::stack-status (wh/describe-stack)
                                     ::sleep (wh/stop-instance)
                                     ;;stack-outputs
                                     ;;update-webhook-cmd
