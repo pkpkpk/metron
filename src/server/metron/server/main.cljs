@@ -24,6 +24,7 @@
 (defn put-object [key value]
   (s3/put-object "metronbucket" key value))
 
+
 (defn exit
   ([code] (exit code nil))
   ([code output]
@@ -36,11 +37,13 @@
 
 (defn -main [event]
   (let [{:keys [x-github-event] :as event} (parse-event event)]
-    (when (= x-github-event "ping")
-      (take! (put-object "pong.edn" (pp event))
-        (fn [[err ok :as res]]
-          (if err
-            (exit 1 (.-message err))
-            (exit 0)))))))
+    (io/spit "last_event.edn" (pp event))
+    ; (when (= x-github-event "ping")
+    ;   (take! (put-object "pong.edn" (pp event))
+    ;     (fn [[err ok :as res]]
+    ;       (if err
+    ;         (exit 1 (.-message err))
+    ;         (exit 0)))))
+    ))
 
 (set! *main-cli-fn* -main)

@@ -1,4 +1,4 @@
-(ns metron.main
+(ns metron.cli.main
   (:require-macros [metron.macros :refer [with-promise]])
   (:require [cljs.core.async :refer [go go-loop chan promise-chan put! take! close! >! <! to-chan!]]
             [cljs.nodejs :as nodejs]

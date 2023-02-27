@@ -70,6 +70,16 @@
          (println "Waiting for instance " iid)
          (pipe1 (ec2/wait-for-ok iid) out))))))
 
+(def start-instance wait-for-instance)
+
+(defn instance-state []
+  (with-promise out
+    (take! (instance-status)
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (put! out [nil (get-in ok [:State :Name])]))))))
+
 (defn ssh-address []
   (with-promise out
     (take! (instance-status)
