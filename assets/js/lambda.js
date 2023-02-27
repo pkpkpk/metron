@@ -3,10 +3,12 @@ var region = process.env.REGION;
 var instanceId = process.env.INSTANCE_ID;
 
 var crypto = require("crypto");
-const { SSMClient, StartSessionCommand, SendCommandCommand } = require('@aws-sdk/client-ssm');
 const ec2 = require("@aws-sdk/client-ec2");
-const ec2Client = new ec2.EC2Client({ region });
-const ssm = new SSMClient();
+const {
+        SSMClient, StartSessionCommand, SendCommandCommand,
+        GetCommandInvocationCommand,TerminateSessionCommand
+      } = require('@aws-sdk/client-ssm');
+
 
 function verify_signature(body, request_sig){
     var HMAC = crypto.createHmac("sha256", secret);
@@ -49,26 +51,29 @@ exports.handler = async(event, _ctx) => {
     } else {
 
       try {
+        // this path will fail if the instance agent has not yet registered
+        // with the SSM 'fleet'... there does not appear to be a programmatic
+        // way to wait for this
         await waitForInstanceRunning();
+        const ssm = new SSMClient();
         const startSessionCommand = new StartSessionCommand({Target: instanceId});
         const startSessionData = await ssm.send(startSessionCommand);
         const sessionId = startSessionData.SessionId;
         console.log('SSM session started successfully:', sessionId);
 
-        var cmd;
+        // var event_json = JSON.stringify(event);
 
         event.body = JSON.parse(event.body);
 
-        if (event.headers["x-github-event"] == "ping") {
-          cmd = `printf '%s' '${JSON.stringify(event)}' | aws s3 cp - s3://metronbucket/PONG.json`;
-        } else {
-          cmd = `printf '%s' '${JSON.stringify(event)}' | aws s3 cp - s3://metronbucket/event.json`;
-        }
+        var cmd = `node metron_server.js '${JSON.stringify(event)}'`;
 
         const sendCommandParams = {
           DocumentName: 'AWS-RunShellScript',
           Parameters: {
-            commands: [ cmd, 'shutdown -h now']
+            commands: [
+            cmd
+            // 'shutdown -h now'
+            ]
           },
           Targets: [{Key: 'InstanceIds', Values: [instanceId]}]
         };
@@ -77,11 +82,47 @@ exports.handler = async(event, _ctx) => {
         const sendCommandData = await ssm.send(sendCommandCommand);
         const commandId = sendCommandData.Command.CommandId;
         console.log('SSM command executed successfully:', commandId);
-        return {statusCode: 200, body: JSON.stringify(event)}
+
+
+        const getCommandInvocationParams = {
+          CommandId: commandId,
+          InstanceId: instanceId
+        };
+
+        let stdout = "";
+        let stderr = "";
+        let commandResult;
+
+        // avoiding 'InvocationDoesNotExist' error
+        await new Promise(resolve => setTimeout(resolve, 1000))
+
+        while (true) {
+          const getCommandInvocationCommand = new GetCommandInvocationCommand(getCommandInvocationParams);
+          console.log("awaiting invocation...");
+          const getCommandInvocationResponse = await ssm.send(getCommandInvocationCommand);
+          if (getCommandInvocationResponse.Status === "InProgress") {
+            await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before checking again
+          } else {
+            stdout += getCommandInvocationResponse.StandardOutputContent;
+            stderr += getCommandInvocationResponse.StandardErrorContent;
+            commandResult = getCommandInvocationResponse;
+            break;
+          }
+        }
+
+        const endSessionParams = {
+          SessionId: sessionId,
+          Target: instanceId
+        };
+
+        const terminateSessionCommand = new TerminateSessionCommand(endSessionParams);
+        await ssm.send(terminateSessionCommand);
+
+        return {statusCode: 200, body: commandResult}
       } catch (err) {
         return {
           statusCode: 500,
-          body: JSON.stringify(err.message)
+          body: err
         };
       }
     }

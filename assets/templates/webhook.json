@@ -107,6 +107,7 @@
                         "ssm:TerminateSession",
                         "ssm:StartSession",
                         "ssm:ResumeSession",
+                        "ssm:GetCommandInvocation",
                         "ssm:DescribeSessions",
                         "ec2:*"
                     ],
