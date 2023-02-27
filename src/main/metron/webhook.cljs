@@ -55,23 +55,6 @@
                 (put! out res)
                 (put! out [nil (get-in ok [:Reservations 0 :Instances 0])])))))))))
 
-(defn wait-for-instance
-  ([]
-   (with-promise out
-     (take! (get-stack-outputs)
-       (fn [[err {:keys [InstanceId] :as ok} :as res]]
-         (if err
-           (put! out res)
-           (pipe1 out (wait-for-instance InstanceId)))))))
-  ([iid]
-   (with-promise out
-     (take! (ec2/start-instance iid)
-       (fn [_]
-         (println "Waiting for instance " iid)
-         (pipe1 (ec2/wait-for-ok iid) out))))))
-
-(def start-instance wait-for-instance)
-
 (defn instance-state []
   (with-promise out
     (take! (instance-status)
@@ -80,13 +63,36 @@
           (put! out res)
           (put! out [nil (get-in ok [:State :Name])]))))))
 
+(defn wait-for-instance
+  ([]
+   (with-promise out
+     (take! (get-stack-outputs)
+       (fn [[err {:keys [InstanceId] :as ok} :as res]]
+         (if err
+           (put! out res)
+           (pipe1 (wait-for-instance InstanceId) out))))))
+  ([iid]
+   (with-promise out
+     (take! (instance-state)
+        (fn [[err ok :as res]]
+          (if err
+            (put! out res)
+            (if (= "running" ok)
+              (put! out res)
+              (take! (ec2/start-instance iid)
+                (fn [_]
+                  (println "Waiting for instance " iid)
+                  (pipe1 (ec2/wait-for-ok iid) out))))))))))
+
+(def start-instance wait-for-instance)
+
 (defn ssh-address []
   (with-promise out
-    (take! (instance-status)
+    (take! (instance-state)
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (if-not (= "running" (get-in ok [:State :Name]))
+          (if-not (= "running" ok)
             (put! out [{:msg "Instance is not running!"}])
             (let [public-dns (get ok :PublicDnsName)]
               (put! out [nil (str "ec2-user@" public-dns)]))))))))
