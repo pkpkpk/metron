@@ -24,6 +24,7 @@
     (let [rl (.createInterface readline #js{:input (.-stdin js/process) :output (.-stdout js/process)})]
       (.question rl "hit any key to continue"
         (fn [answer]
+          (println "lkfsdljslfjl")
           (.close rl)
           (close! out))))))
 

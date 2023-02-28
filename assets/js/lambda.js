@@ -1,13 +1,13 @@
-var secret = process.env.WEBHOOK_SECRET;
-var region = process.env.REGION;
-var instanceId = process.env.INSTANCE_ID;
+const secret = process.env.WEBHOOK_SECRET;
+const region = process.env.REGION;
+const instanceId = process.env.INSTANCE_ID;
+const maxWaitTime = process.env.MAX_WAIT_TIME || 500;
+const shouldWaitForInvocation = process.env.SHOULD_WAIT_FOR_INVOCATION;
 
-var crypto = require("crypto");
+const crypto = require("crypto");
 const ec2 = require("@aws-sdk/client-ec2");
-const {
-        SSMClient, StartSessionCommand, SendCommandCommand,
-        GetCommandInvocationCommand,TerminateSessionCommand
-      } = require('@aws-sdk/client-ssm');
+const { SSMClient, StartSessionCommand, SendCommandCommand,
+        GetCommandInvocationCommand,TerminateSessionCommand } = require('@aws-sdk/client-ssm');
 
 
 function verify_signature(body, request_sig){
@@ -17,24 +17,15 @@ function verify_signature(body, request_sig){
     return request_sig == "sha256="+ hashsum;
 }
 
-async function waitForInstanceRunning() {
+async function waitForInstanceOk() {
   const ec2Client = new ec2.EC2Client({ region });
   try {
     const startInstanceResult = await ec2Client.send(new ec2.StartInstancesCommand({
       InstanceIds: [instanceId]
     }));
 
-    // if instance is already running we are ready to go
-    if (startInstanceResult.StartingInstances[0].CurrentState.Name === 'running') {
-      return Promise.resolve(startInstanceResult);
-    }
-    // else wait for instance to wake up before allowing SSM to proceed
-    var wait_params = {
-      client: ec2Client,
-      delay: 5,
-      maxWaitTime: 120
-    };
-    await ec2.waitUntilInstanceRunning(wait_params, {InstanceIds: [instanceId]});
+    var wait_params = { client: ec2Client, delay: 5, maxWaitTime};
+    await ec2.waitUntilInstanceStatusOk(wait_params, {InstanceIds: [instanceId]});
     return Promise.resolve(startInstanceResult);
   } catch (error) {
     return Promise.reject(error);
@@ -51,17 +42,12 @@ exports.handler = async(event, _ctx) => {
     } else {
 
       try {
-        // this path will fail if the instance agent has not yet registered
-        // with the SSM 'fleet'... there does not appear to be a programmatic
-        // way to wait for this
-        await waitForInstanceRunning();
+        await waitForInstanceOk();
         const ssm = new SSMClient();
         const startSessionCommand = new StartSessionCommand({Target: instanceId});
         const startSessionData = await ssm.send(startSessionCommand);
         const sessionId = startSessionData.SessionId;
         console.log('SSM session started successfully:', sessionId);
-
-        // var event_json = JSON.stringify(event);
 
         event.body = JSON.parse(event.body);
 
@@ -70,6 +56,7 @@ exports.handler = async(event, _ctx) => {
         const sendCommandParams = {
           DocumentName: 'AWS-RunShellScript',
           Parameters: {
+            workingDirectory: ["/home/ec2-user"],
             commands: [
             cmd
             // 'shutdown -h now'
@@ -81,45 +68,48 @@ exports.handler = async(event, _ctx) => {
         const sendCommandCommand = new SendCommandCommand(sendCommandParams);
         const sendCommandData = await ssm.send(sendCommandCommand);
         const commandId = sendCommandData.Command.CommandId;
-        console.log('SSM command executed successfully:', commandId);
 
+        if (!shouldWaitForInvocation){
+          return {status: 200, body: sendCommandData};
+        } else {
 
-        const getCommandInvocationParams = {
-          CommandId: commandId,
-          InstanceId: instanceId
-        };
+          const getCommandInvocationParams = {
+            CommandId: commandId,
+            InstanceId: instanceId
+          };
 
-        let stdout = "";
-        let stderr = "";
-        let commandResult;
+          let stdout = "";
+          let stderr = "";
+          let commandResult;
 
-        // avoiding 'InvocationDoesNotExist' error
-        await new Promise(resolve => setTimeout(resolve, 1000))
+          await new Promise(resolve => setTimeout(resolve, 1000))
 
-        while (true) {
-          const getCommandInvocationCommand = new GetCommandInvocationCommand(getCommandInvocationParams);
-          console.log("awaiting invocation...");
-          const getCommandInvocationResponse = await ssm.send(getCommandInvocationCommand);
-          if (getCommandInvocationResponse.Status === "InProgress") {
-            await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before checking again
-          } else {
-            stdout += getCommandInvocationResponse.StandardOutputContent;
-            stderr += getCommandInvocationResponse.StandardErrorContent;
-            commandResult = getCommandInvocationResponse;
-            break;
+          while (true) {
+            const getCommandInvocationCommand = new GetCommandInvocationCommand(getCommandInvocationParams);
+            console.log("awaiting invocation...");
+            const getCommandInvocationResponse = await ssm.send(getCommandInvocationCommand);
+            if (getCommandInvocationResponse.Status === "InProgress") {
+              await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before checking again
+            } else {
+              stdout += getCommandInvocationResponse.StandardOutputContent;
+              stderr += getCommandInvocationResponse.StandardErrorContent;
+              commandResult = getCommandInvocationResponse;
+              break;
+            }
           }
+
+          const endSessionParams = {
+            SessionId: sessionId,
+            Target: instanceId
+          };
+
+          const terminateSessionCommand = new TerminateSessionCommand(endSessionParams);
+          await ssm.send(terminateSessionCommand);
+
+          return {statusCode: 200, body: commandResult}
         }
-
-        const endSessionParams = {
-          SessionId: sessionId,
-          Target: instanceId
-        };
-
-        const terminateSessionCommand = new TerminateSessionCommand(endSessionParams);
-        await ssm.send(terminateSessionCommand);
-
-        return {statusCode: 200, body: commandResult}
       } catch (err) {
+        console.error(err)
         return {
           statusCode: 500,
           body: err

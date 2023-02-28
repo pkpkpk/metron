@@ -35,15 +35,17 @@
        (.write (.. js/process -stderr) output)))
    (js/process.exit code)))
 
-(defn -main [event]
-  (let [{:keys [x-github-event] :as event} (parse-event event)]
-    (io/spit "last_event.edn" (pp event))
-    ; (when (= x-github-event "ping")
-    ;   (take! (put-object "pong.edn" (pp event))
-    ;     (fn [[err ok :as res]]
-    ;       (if err
-    ;         (exit 1 (.-message err))
-    ;         (exit 0)))))
-    ))
+(defn -main
+  ([](exit 0 "WTF bro"))
+  ([event]
+   (let [{:keys [x-github-event] :as event} (parse-event event)]
+     (println "hola!")
+     (when (= x-github-event "ping")
+       (take! (put-object "pong.edn" (pp event))
+         (fn [[err ok :as res]]
+           (println "res: " res)
+           (if err
+             (exit 1 (.-message err))
+             (exit 0))))))))
 
 (set! *main-cli-fn* -main)

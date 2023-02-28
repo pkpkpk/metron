@@ -292,10 +292,17 @@
                         (fn [[err ok :as res]]
                           (put! out res)))))))))))))))
 
+(defn setup-bucket [opts]
+  ;;TODO  upload-server script
+  (with-promise out
+    (take! (ensure-bucket opts)
+      (fn [[err ok :as res]]
+        (put! out res)))))
+
 (defn create-webhook-stack
   [{:keys [key-pair-name] :as opts}]
   (with-promise out
-    (take! (ensure-bucket opts)
+    (take! (setup-bucket opts)
       (fn [[err ok :as res]]
         (if err
           (put! out res)

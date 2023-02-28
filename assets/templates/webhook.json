@@ -39,7 +39,6 @@
     },
 
     "WebhookSrc": {"Type" : "String"},
-
     "WebhookSecret": {"Type": "String"}
   },
   "Outputs" : {
@@ -133,7 +132,8 @@
           "Variables" : {
             "WEBHOOK_SECRET" : { "Ref" : "WebhookSecret" },
             "REGION" : { "Ref" : "AWS::Region" },
-            "INSTANCE_ID" : {"Ref" : "EC2Instance"}
+            "INSTANCE_ID" : {"Ref" : "EC2Instance"},
+            "SHOULD_WAIT_FOR_INVOCATION" : {"Value": false}
           }
         }
       }
@@ -221,7 +221,7 @@
                     "sudo curl --silent --location https://rpm.nodesource.com/setup_16.x | bash\n",
                     "sudo yum -y install nodejs\n",
                     "npm update -g npm\n",
-                    "npm install aws-sdk -g\n",
+                    "npm install aws-sdk\n",
                     "sudo yum install docker -y\n",
                     "sudo service docker start\n",
                     "sudo usermod -a -G docker ec2-user\n",
