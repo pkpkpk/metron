@@ -1,5 +1,6 @@
 (ns metron.macros)
 
+
 (defmacro with-promise [name & body]
   `(let [~name (~'cljs.core.async/promise-chan)]
      ~@body

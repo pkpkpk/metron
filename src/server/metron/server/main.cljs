@@ -9,6 +9,7 @@
             [goog.object]
             [metron.aws.s3 :as s3]
             [metron.aws.ec2 :as ec2]
+            [metron.git :as g]
             [metron.util :as util :refer [*debug* pp]]))
 
 (nodejs/enable-util-print!)
@@ -16,36 +17,71 @@
 (defn parse-event [event]
   (let [json (js/JSON.parse event)
         repo (js->clj (.. json -body -repository) :keywordize-keys true)
-        repo-ks [:default-branch :full_name :git_url :ssh_url :pushed_at :url]]
+        head_commit (some-> (.. json -body -head_commit) (js->clj :keywordize-keys true))
+        repo-ks [:default_branch
+                 :full_name
+                 :git_url
+                 :ssh_url
+                 :pushed_at
+                 :url
+                 :name
+                 :master_branch
+                 :default_branch
+                 :pushed_at]]
     (assoc (select-keys repo repo-ks)
+           :before (.. json -body -before)
+           :after (.. json -body -after)
+           :ref (.. json -body -ref)
+           :head_commit head_commit
            :query-params (js->clj (.-queryStringParameters json) :keywordize-keys true)
            :x-github-event (goog.object.get (.. json -headers) "x-github-event"))))
 
 (defn put-object [key value]
   (s3/put-object "metronbucket" key value))
 
-
 (defn exit
   ([code] (exit code nil))
   ([code output]
    (if (zero? code)
      (when output
-       (.write (.. js/process -stdout) output))
+       (.write (.. js/process -stdout) (pr-str output)))
      (when output
-       (.write (.. js/process -stderr) output)))
+       (.write (.. js/process -stderr) (pr-str output))))
    (js/process.exit code)))
 
+(defn report-results [[err ok :as res]]
+  (println "results:" res)
+  (io/spit "last-result.edn" (pp res))
+  (take! (put-object "results.edn" (pp res))
+    (fn [_]
+      (if err
+        (exit 1 (.-message err))
+        (exit 0)))))
+
+(defn handle-ping [event]
+  (take! (put-object "pong.edn" (pp event))
+    (fn [[err ok :as res]]
+      (if err
+        (exit 1 (.-message err))
+        (exit 0)))))
+
+(defn handle-push [event]
+  (try
+    (take! (g/ensure-repo event) report-results)
+    (catch js/Error err
+      (report-results [{:msg "Uncaught error"
+                        :cause err}]))))
+
 (defn -main
-  ([](exit 0 "WTF bro"))
-  ([event]
-   (let [{:keys [x-github-event] :as event} (parse-event event)]
-     (println "hola!")
-     (when (= x-github-event "ping")
-       (take! (put-object "pong.edn" (pp event))
-         (fn [[err ok :as res]]
-           (println "res: " res)
-           (if err
-             (exit 1 (.-message err))
-             (exit 0))))))))
+  [raw-event]
+  (assert (string? raw-event))
+  (io/spit "last_event.json" raw-event)
+  (take! (put-object "last_event.json" raw-event)
+    (fn [_]
+      (let [{:keys [x-github-event] :as event} (parse-event raw-event)]
+        (case x-github-event
+          "ping" (handle-ping event)
+          "push" (handle-push event)
+          (report-results [{:msg (str "unrecognized event '" x-github-event "'")}]))))))
 
 (set! *main-cli-fn* -main)
