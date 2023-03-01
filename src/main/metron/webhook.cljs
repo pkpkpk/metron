@@ -178,7 +178,6 @@
       (println "Generating deploy key on instance...")
       (take! (ssm/run-script iid script)
         (fn [[err ok :as res]]
-          ; (println "keygen.sh res:" (util/pp res))
           (if err
             (put! out res)
             (put! out [nil (get ok :StandardOutputContent)])))))))
@@ -232,8 +231,7 @@
   (println "")
   (println "1) go to https://github.com/:user/:repo/settings/hooks")
   (println "2) click 'Add webhook'")
-  (println "3) In the 'Payload URL' field enter '" WebhookUrl "'")
-  ; ?branch=metron
+  (println "3) In the 'Payload URL' field enter '" (str WebhookUrl "?branch=metron") "'")
   (println "4) In the 'Content type' select menu choose 'application/json'")
   (println "5) In the 'Secret' field enter (without quotes): '" WebhookSecret "'")
   (println "6) Choose 'Just the push event' and click Add webhook to finish")
