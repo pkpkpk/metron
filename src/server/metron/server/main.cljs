@@ -10,6 +10,7 @@
             [metron.aws.s3 :as s3]
             [metron.aws.ec2 :as ec2]
             [metron.git :as g]
+            [metron.docker :as d]
             [metron.util :as util :refer [*debug* pp]]))
 
 (nodejs/enable-util-print!)
@@ -63,19 +64,24 @@
         (exit 1 (.-message err))
         (exit 0)))))
 
-(defn handle-push [event]
-  (try
-    (take! (g/fetch-event event) report-results)
-    (catch js/Error err
-      (report-results [{:msg "Uncaught error"
-                        :cause err}]))))
+(defn handle-push [{:as event}]
+  (when (= (:ref event) "refs/heads/metron")
+    (try
+      (take! (g/fetch-event event)
+         (fn [[err ok :as res]]
+           (if err
+             (report-results res)
+             (take! (d/process-event ok) report-results))))
+      (catch js/Error err
+        (report-results [{:msg "Uncaught error"
+                          :cause err}])))))
 
 (defn -main
   [raw-event]
   (io/spit "last_event.json" raw-event)
   (take! (put-object "last_event.json" raw-event)
     (fn [_]
-      (let [{:keys [x-github-event] :as event} (parse-event raw-event)]
+      (let [{:keys [x-github-event ref] :as event} (parse-event raw-event)]
         (case x-github-event
           "ping" (handle-ping event)
           "push" (handle-push event)

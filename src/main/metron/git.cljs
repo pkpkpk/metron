@@ -9,37 +9,40 @@
 (def path (js/require "path"))
 
 (defn local-dir-path [{:keys [full_name]}]
-  (.join path "metron_repository" full_name))
+  (.join path "metron_repos" full_name))
 
-(defn repo-exists? [event]
-  (.exists (io/file (local-dir-path event))))
-
-(def GIT_SSH_COMMAND "ssh -i /home/ec2-user/deploykey")
-
-(defn clone-repo [{:keys [full_name ssh_url] :as event}]
+(defn clone-repo [{:keys [ssh_url] :as event}]
   (proc/aexec (str "sudo -u ec2-user git clone --depth 1 " ssh_url " " (local-dir-path event))
              {:encoding "utf8"}))
 
-(defn fetch-branch [{:keys [full_name ssh_url] :as event}]
+(defn fetch-branch [{:as event}]
   (proc/aexec (str "sudo -u ec2-user git fetch origin metron")
               {:encoding "utf8"
                :cwd (local-dir-path event)}))
 
-(defn create-metron-branch [event]
+(defn create-metron-branch [{:as event}]
   (proc/aexec (str "sudo -u ec2-user git checkout -b metron")
               {:encoding "utf8"
                :cwd (local-dir-path event)}))
 
-(defn pull-metron-branch [event]
+(defn pull-metron-branch [{:as event}]
   (proc/aexec (str "sudo -u ec2-user git pull origin metron")
               {:encoding "utf8"
                :cwd (local-dir-path event)}))
 
-(defn checkout-branch [{:as event}]
+(defn checkout-metron-branch [{:as event}]
+  (proc/aexec (str "sudo -u ec2-user git checkout metron")
+              {:encoding "utf8"
+               :cwd (local-dir-path event)}))
+
+(defn current-sha [{:as event}]
+  (proc/aexec (str "sudo -u ec2-user git rev-parse HEAD")
+              {:encoding "utf8"
+               :cwd (local-dir-path event)}))
+
+(defn ensure-metron-branch [{:as event}]
   (with-promise out
-    (take! (proc/aexec (str "sudo -u ec2-user git checkout metron")
-                       {:encoding "utf8"
-                        :cwd (local-dir-path event)})
+    (take! (checkout-metron-branch event)
       (fn [[err :as res]]
         (if (nil? err)
           (pipe1 (pull-metron-branch event) out)
@@ -49,43 +52,33 @@
               (fn [[err ok :as res]]
                 (if err
                   (put! out res)
-                  (pipe1 (pull-metron-branch event) out))))))))))
+                  (take! (pull-metron-branch event)
+                    (fn [[err :as res]]
+                      (if err
+                        (put! out res)
+                        (put! out [nil event])))))))))))))
 
-(defn current-sha [{:keys [after] :as event}]
-  (proc/aexec (str "sudo -u ec2-user git rev-parse HEAD")
-              {:encoding "utf8"
-               :cwd (local-dir-path event)}))
-
-(defn ensure-repo [{:keys [full_name ssh_url] :as opts}]
+(defn ensure-repo [{:as event}]
   (with-promise out
-    (if (repo-exists? opts)
-      (put! out [nil])
-      (let [f (io/file "metron_repository")]
-        (pipe1 (clone-repo opts) out)))))
-
-(defn set-ownership [{:as event}]
-  (proc/aexec (str "sudo chown -R $(whoami) " (local-dir-path event))
-              {:encoding "utf8"}))
+    (let [repo-path (local-dir-path event)]
+      (if (.exists (io/file repo-path))
+        (put! out [nil (assoc event :repo-path repo-path)])
+        (take! (clone-repo event)
+          (fn [[err :as res]]
+            (if err
+              (put! out res)
+              (put! out [nil (assoc event :repo-path repo-path)]))))))))
 
 (defn sha-matches?
-  [{:keys [ref full_name after] :as event}]
+  [{:keys [after] :as event}]
   (with-promise out
     (take! (current-sha event)
       (fn [[err ok :as res]]
         (if err
           (put! out res)
           (if (= after (string/trim ok))
-            (put! out [nil])
+            (put! out [nil event])
             (put! out [{:msg "sha does not match after fetch?!"}])))))))
-
-{:default_branch "main",
- :full_name "pkpkpk/testrepo",
- :pushed_at "2023-02-02T18:48:27Z",
- :query-params {:branch "metron"},
- :url "https://api.github.com/repos/pkpkpk/testrepo",
- :git_url "git://github.com/pkpkpk/testrepo.git",
- :ssh_url "git@github.com:pkpkpk/testrepo.git",
- :x-github-event "ping"}
 
 (defn fetch-event
   [{:as event}]
@@ -94,11 +87,15 @@
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (take! (checkout-branch event)
-            (fn [[err :as res]]
+          (take! (ensure-metron-branch ok)
+            (fn [[err ok :as res]]
               (if err
                 (put! out res)
-                (pipe1 (sha-matches? event) out)))))))))
+                (take! (sha-matches? event)
+                  (fn [[err :as res]]
+                    (if err
+                      (put! out res)
+                      (put! out [nil ok]))))))))))))
 
 
 
