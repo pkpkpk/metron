@@ -17,39 +17,50 @@
 (def GIT_SSH_COMMAND "ssh -i /home/ec2-user/deploykey")
 
 (defn clone-repo [{:keys [full_name ssh_url] :as event}]
-  (proc/aexec (str "git clone --depth 1 " ssh_url " " (local-dir-path event))
-             {:encoding "utf8"
-              :env {"GIT_SSH_COMMAND" GIT_SSH_COMMAND}}))
+  (proc/aexec (str "sudo -u ec2-user git clone --depth 1 " ssh_url " " (local-dir-path event))
+             {:encoding "utf8"}))
 
 (defn fetch-branch [{:keys [full_name ssh_url] :as event}]
-  (proc/aexec (str "git fetch origin metron && git checkout metron")
-              {:encoding "utf8"
-               :cwd (local-dir-path event)
-               :env {"GIT_SSH_COMMAND" GIT_SSH_COMMAND}}))
-
-(defn current-sha [{:keys [after] :as event}]
-  (proc/aexec (str "git rev-parse HEAD")
+  (proc/aexec (str "sudo -u ec2-user git fetch origin metron")
               {:encoding "utf8"
                :cwd (local-dir-path event)}))
 
-; (defn ensure-metron-checkout [{:keys [full_name ssh_url] :as event}]
-;   (with-promise out
-;     (take! (proc/aexec "git status" {:encoding "utf8" :cwd (local-dir-path event)})
-;       (fn [[err ok :as res]]
-;         (if err
-;           (put! out res)
-;           (if (string/starts-with? ok "On branch metron")
-;             (put! out [nil])
-;             (pipe1 (proc/aexec "git checkout metron" {:encoding "utf8" :cwd (local-dir-path event)})
-;               out)))))))
+(defn create-metron-branch [event]
+  (proc/aexec (str "sudo -u ec2-user git checkout -b metron")
+              {:encoding "utf8"
+               :cwd (local-dir-path event)}))
+
+(defn pull-metron-branch [event]
+  (proc/aexec (str "sudo -u ec2-user git pull origin metron")
+              {:encoding "utf8"
+               :cwd (local-dir-path event)}))
+
+(defn checkout-branch [{:as event}]
+  (with-promise out
+    (take! (proc/aexec (str "sudo -u ec2-user git checkout metron")
+                       {:encoding "utf8"
+                        :cwd (local-dir-path event)})
+      (fn [[err :as res]]
+        (if (nil? err)
+          (pipe1 (pull-metron-branch event) out)
+          (if-not (string/includes? (.-message err) "did not match any file(s) known to git")
+            (put! out res)
+            (take! (create-metron-branch event)
+              (fn [[err ok :as res]]
+                (if err
+                  (put! out res)
+                  (pipe1 (pull-metron-branch event) out))))))))))
+
+(defn current-sha [{:keys [after] :as event}]
+  (proc/aexec (str "sudo -u ec2-user git rev-parse HEAD")
+              {:encoding "utf8"
+               :cwd (local-dir-path event)}))
 
 (defn ensure-repo [{:keys [full_name ssh_url] :as opts}]
   (with-promise out
     (if (repo-exists? opts)
       (put! out [nil])
       (let [f (io/file "metron_repository")]
-        (when-not (.exists f)
-          (.mkdir f))
         (pipe1 (clone-repo opts) out)))))
 
 (defn set-ownership [{:as event}]
@@ -83,17 +94,11 @@
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (take! (fetch-branch event)
-            (fn [[err ok :as res]]
+          (take! (checkout-branch event)
+            (fn [[err :as res]]
               (if err
                 (put! out res)
-                (pipe1 (sha-matches? event) out)
-                ; (take! (ensure-metron-checkout event)
-                ;   (fn [[err ok :as res]]
-                ;     (if err
-                ;       (put! out res)
-                ;       (pipe1 (sha-matches? event) out))))
-                ))))))))
+                (pipe1 (sha-matches? event) out)))))))))
 
 
 

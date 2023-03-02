@@ -13,7 +13,9 @@
 (defn send-script-cmd [instance cmd]
   (edn-res-chan (.sendCommand SSM #js{:DocumentName "AWS-RunShellScript"
                                       :InstanceIds #js[instance]
-                                      :Parameters #js{:commands #js[cmd]
+                                      :Parameters #js{:commands (if (string? cmd)
+                                                                  #js[cmd]
+                                                                  (into-array cmd))
                                                       :workingDirectory #js["/home/ec2-user"]}})))
 
 (defn get-command-invocation [iid cid]

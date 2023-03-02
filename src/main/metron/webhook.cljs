@@ -88,11 +88,11 @@
 
 (defn ssh-address []
   (with-promise out
-    (take! (instance-state)
+    (take! (instance-status)
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (if-not (= "running" ok)
+          (if-not (= "running" (get-in ok [:State :Name]))
             (put! out [{:msg "Instance is not running!"}])
             (let [public-dns (get ok :PublicDnsName)]
               (put! out [nil (str "ec2-user@" public-dns)]))))))))
@@ -310,6 +310,15 @@
             (put! out res)
             (pipe1 (ssm/run-script ok cmd) out)))))))
 
+(defn install-aws-sdk [] ;;work around for npm bullshit during userdata
+  (let [cmd "npm install aws-sdk"]
+    (with-promise out
+      (take! (instance-id)
+        (fn [[err ok :as res]]
+          (if err
+            (put! out res)
+            (pipe1 (ssm/run-script ok cmd) out)))))))
+
 (defn create-webhook-stack
   [{:keys [key-pair-name] :as opts}]
   (with-promise out
@@ -329,10 +338,14 @@
                       (if err
                         (put! out res)
                         (take! (upload-metron-server-to-instance)
-                          (fn [[err]]
+                          (fn [[err :as res]]
                             (if err
                               (put! out res)
-                              (pipe1 (configure-webhook outputs) out))))))))))))))))
+                              (take! (install-aws-sdk)
+                                (fn [[err :as res]]
+                                  (if err
+                                    (put! out res)
+                                    (pipe1 (configure-webhook outputs) out)))))))))))))))))))
 
 (defn delete-webhook [arg]
   (with-promise out

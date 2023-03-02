@@ -42,10 +42,9 @@
 (defn exit
   ([code] (exit code nil))
   ([code output]
-   (if (zero? code)
-     (when output
-       (.write (.. js/process -stdout) (pr-str output)))
-     (when output
+   (when output
+     (if (zero? code)
+       (.write (.. js/process -stdout) (pr-str output))
        (.write (.. js/process -stderr) (pr-str output))))
    (js/process.exit code)))
 
@@ -84,7 +83,8 @@
 
 (.on js/process "uncaughtException"
   (fn [err origin]
+    (println "uncaughtException:" {:err err :origin origin})
     (io/spit "uncaughtException.edn" {:err err :origin origin})
-    (put-object "uncaughtException.edn" {:err err :origin origin})))
+    (put-object "uncaughtException.edn" (pp {:err err :origin origin}))))
 
 (set! *main-cli-fn* -main)
