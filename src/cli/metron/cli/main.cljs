@@ -14,9 +14,9 @@
 (nodejs/enable-util-print!)
 
 (defn exit [status data]
-  (let [msg (or (and (map? data)
-                     (get data :msg))
-                (pp data))]
+  (let [msg  (if (string? data)
+               data
+               (pp data))]
     (if (zero? status)
       (.write (.-stdout js/process) msg)
       (.write (.-stderr js/process) msg))
@@ -38,12 +38,9 @@
    [nil "--delete-webhook" "delete webhook stack"]
    [nil "--configure-webhook" "add/edit webhook with existing stack"]
    [nil "--start" "start instance"]
-   [nil "--sleep" "ensure instance is stopped"]
    [nil "--stop" "ensure instance is stopped"]
    [nil "--ssh" "return ssh dst into instance. without elastic-ip configured, changes every start/stop cycle"]
-   ["-k" "--key-pair-name KEYPAIRNAME" "name of a SSH key registered with ec2"]
-   ; [nil "--gen-key" "generate metron.pem"]
-   ])
+   ["-k" "--key-pair-name KEYPAIRNAME" "name of a SSH key registered with ec2"]])
 
 (defn error-msg [errors] ;;TODO tailor error messages to optis
   (str "The following errors occurred while parsing your command:\n\n"
@@ -79,10 +76,6 @@
       (:start options)
       {:action ::start
        :opts (dissoc options :start)}
-
-      (:sleep options)
-      {:action ::sleep
-       :opts (dissoc options :sleep)}
 
       (:stop options)
       {:action ::stop
@@ -129,7 +122,6 @@
                                     ::stack-status (wh/describe-stack)
                                     ::start (wh/wait-for-instance)
                                     ::stop (wh/stop-instance)
-                                    ::sleep (wh/stop-instance)
                                     ::ssh (wh/ssh-address)
                                     ;;stack-outputs
                                     ;;update-webhook-cmd

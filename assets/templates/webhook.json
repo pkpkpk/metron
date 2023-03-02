@@ -127,13 +127,14 @@
         "Role": { "Fn::GetAtt" : ["WebhookExecutionRole", "Arn"] },
         "Code": { "ZipFile": {"Ref": "WebhookSrc"}},
         "Runtime": "nodejs18.x",
-        "Timeout": 90,
+        "Timeout": 500,
         "Environment" : {
           "Variables" : {
             "WEBHOOK_SECRET" : { "Ref" : "WebhookSecret" },
             "REGION" : { "Ref" : "AWS::Region" },
             "INSTANCE_ID" : {"Ref" : "EC2Instance"},
-            "SHOULD_WAIT_FOR_INVOCATION" : {"Value": false}
+            "SHOULD_WAIT_FOR_INVOCATION" : false,
+            "SHOULD_SHUTDOWN_INSTANCE" : false,
           }
         }
       }
@@ -220,7 +221,6 @@
                     "sudo yum install git -y\n",
                     "sudo curl --silent --location https://rpm.nodesource.com/setup_16.x | bash\n",
                     "sudo yum -y install nodejs\n",
-                    "npm update -g npm\n",
                     "npm install aws-sdk\n",
                     "sudo yum install docker -y\n",
                     "sudo service docker start\n",

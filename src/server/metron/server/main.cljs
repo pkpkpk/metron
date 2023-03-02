@@ -50,7 +50,6 @@
    (js/process.exit code)))
 
 (defn report-results [[err ok :as res]]
-  (println "results:" res)
   (io/spit "last-result.edn" (pp res))
   (take! (put-object "results.edn" (pp res))
     (fn [_]
@@ -67,14 +66,13 @@
 
 (defn handle-push [event]
   (try
-    (take! (g/ensure-repo event) report-results)
+    (take! (g/fetch-event event) report-results)
     (catch js/Error err
       (report-results [{:msg "Uncaught error"
                         :cause err}]))))
 
 (defn -main
   [raw-event]
-  (assert (string? raw-event))
   (io/spit "last_event.json" raw-event)
   (take! (put-object "last_event.json" raw-event)
     (fn [_]
@@ -83,5 +81,10 @@
           "ping" (handle-ping event)
           "push" (handle-push event)
           (report-results [{:msg (str "unrecognized event '" x-github-event "'")}]))))))
+
+(.on js/process "uncaughtException"
+  (fn [err origin]
+    (io/spit "uncaughtException.edn" {:err err :origin origin})
+    (put-object "uncaughtException.edn" {:err err :origin origin})))
 
 (set! *main-cli-fn* -main)

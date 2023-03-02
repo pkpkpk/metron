@@ -184,7 +184,7 @@
 
 (defn verify-deploy-key [iid]
   (with-promise out
-    (take! (ssm/run-script iid "sudo -u ec2-user ssh -i id_rsa -T git@github.com")
+    (take! (ssm/run-script iid "sudo -u ec2-user ssh -i .ssh/id_rsa -T git@github.com")
       (fn [[{:keys [StandardErrorContent] :as err} ok :as res]]
         (if (and err (string/includes? StandardErrorContent "successfully authenticated"))
           (put! out [nil])
@@ -204,6 +204,7 @@
     (go-loop []
       (deploy-key-prompt deploy-key)
       (<! (util/get-acknowledgment))
+      (println "verifying deploy key...")
       (let [[err ok] (<! (verify-deploy-key iid))]
         (if (nil? err)
           (do
@@ -231,7 +232,7 @@
   (println "")
   (println "1) go to https://github.com/:user/:repo/settings/hooks")
   (println "2) click 'Add webhook'")
-  (println "3) In the 'Payload URL' field enter '" (str WebhookUrl "?branch=metron") "'")
+  (println "3) In the 'Payload URL' field enter '" (str (subs WebhookUrl 0 (dec (alength WebhookUrl))) "?branch=metron") "'")
   (println "4) In the 'Content type' select menu choose 'application/json'")
   (println "5) In the 'Secret' field enter (without quotes): '" WebhookSecret "'")
   (println "6) Choose 'Just the push event' and click Add webhook to finish")
@@ -244,6 +245,7 @@
     (go-loop []
       (webhook-secret-prompt opts)
       (<! (util/get-acknowledgment))
+      (println "waiting for s3://metronbucket/pong.edn ...")
       (let [[err ok :as res] (<! (verify-webhook-ping))]
         (if (nil? err)
           (do
@@ -291,11 +293,22 @@
                           (put! out res)))))))))))))))
 
 (defn setup-bucket [opts]
-  ;;TODO  upload-server script
   (with-promise out
     (take! (ensure-bucket opts)
       (fn [[err ok :as res]]
-        (put! out res)))))
+        (if err
+          (put! out res)
+          (pipe1 (bkt/put-object "metron_server.js" (io/slurp "metron_server.js"))
+                 out))))))
+
+(defn upload-metron-server-to-instance []
+  (let [cmd "aws s3 cp s3://metronbucket/metron_server.js metron_server.js"]
+    (with-promise out
+      (take! (instance-id)
+        (fn [[err ok :as res]]
+          (if err
+            (put! out res)
+            (pipe1 (ssm/run-script ok cmd) out)))))))
 
 (defn create-webhook-stack
   [{:keys [key-pair-name] :as opts}]
@@ -311,12 +324,15 @@
                 (put! out res)
                 (let [_(println "key-pair OK")
                       opts (assoc opts :WebhookSecret (util/random-string))]
-                  ;; store secret on s3 so can resume config / add new repo
                   (take! (create-stack opts)
-                    (fn [[err ok :as res]]
+                    (fn [[err outputs :as res]]
                       (if err
                         (put! out res)
-                        (configure-webhook ok)))))))))))))
+                        (take! (upload-metron-server-to-instance)
+                          (fn [[err]]
+                            (if err
+                              (put! out res)
+                              (pipe1 (configure-webhook outputs) out))))))))))))))))
 
 (defn delete-webhook [arg]
   (with-promise out

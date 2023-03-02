@@ -1,8 +1,9 @@
 const secret = process.env.WEBHOOK_SECRET;
 const region = process.env.REGION;
 const instanceId = process.env.INSTANCE_ID;
-const maxWaitTime = process.env.MAX_WAIT_TIME || 500;
-const shouldWaitForInvocation = process.env.SHOULD_WAIT_FOR_INVOCATION;
+const maxWaitTime = process.env.MAX_WAIT_TIME ? parseInt(process.env.MAX_WAIT_TIME) : 500;
+const shouldWaitForInvocation = ("true" == process.env.SHOULD_WAIT_FOR_INVOCATION) ? true : false;
+const shouldShutdownInstance = ("true" == process.env.SHOULD_SHUTDOWN_INSTANCE) ? true : false;
 
 const crypto = require("crypto");
 const ec2 = require("@aws-sdk/client-ec2");
@@ -13,8 +14,7 @@ const { SSMClient, StartSessionCommand, SendCommandCommand,
 function verify_signature(body, request_sig){
     var HMAC = crypto.createHmac("sha256", secret);
     HMAC.update(body);
-    var hashsum = HMAC.digest("hex");
-    return request_sig == "sha256="+ hashsum;
+    return request_sig == "sha256="+ HMAC.digest("hex");
 }
 
 async function waitForInstanceOk() {
@@ -51,16 +51,15 @@ exports.handler = async(event, _ctx) => {
 
         event.body = JSON.parse(event.body);
 
-        var cmd = `node metron_server.js '${JSON.stringify(event)}'`;
+        var cmds = [`node metron_server.js '${JSON.stringify(event)}'`];
+
+        if (shouldShutdownInstance){ cmds.push('shutdown -h now') };
 
         const sendCommandParams = {
           DocumentName: 'AWS-RunShellScript',
           Parameters: {
             workingDirectory: ["/home/ec2-user"],
-            commands: [
-            cmd
-            // 'shutdown -h now'
-            ]
+            commands: cmds
           },
           Targets: [{Key: 'InstanceIds', Values: [instanceId]}]
         };
@@ -68,45 +67,36 @@ exports.handler = async(event, _ctx) => {
         const sendCommandCommand = new SendCommandCommand(sendCommandParams);
         const sendCommandData = await ssm.send(sendCommandCommand);
         const commandId = sendCommandData.Command.CommandId;
+        const endSessionParams = {SessionId: sessionId, Target: instanceId};
+        const terminateSessionCommand = new TerminateSessionCommand(endSessionParams);
 
-        if (!shouldWaitForInvocation){
+        if (!shouldWaitForInvocation) {
+          await ssm.send(terminateSessionCommand);
           return {status: 200, body: sendCommandData};
         } else {
 
-          const getCommandInvocationParams = {
-            CommandId: commandId,
-            InstanceId: instanceId
-          };
+          const getCommandInvocationParams = {CommandId: commandId, InstanceId: instanceId};
 
           let stdout = "";
           let stderr = "";
-          let commandResult;
+          let getCommandInvocationResponse;
 
           await new Promise(resolve => setTimeout(resolve, 1000))
 
           while (true) {
             const getCommandInvocationCommand = new GetCommandInvocationCommand(getCommandInvocationParams);
-            console.log("awaiting invocation...");
-            const getCommandInvocationResponse = await ssm.send(getCommandInvocationCommand);
+            getCommandInvocationResponse = await ssm.send(getCommandInvocationCommand);
             if (getCommandInvocationResponse.Status === "InProgress") {
-              await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before checking again
+              await new Promise(resolve => setTimeout(resolve, 5000));
             } else {
               stdout += getCommandInvocationResponse.StandardOutputContent;
               stderr += getCommandInvocationResponse.StandardErrorContent;
-              commandResult = getCommandInvocationResponse;
               break;
             }
           }
 
-          const endSessionParams = {
-            SessionId: sessionId,
-            Target: instanceId
-          };
-
-          const terminateSessionCommand = new TerminateSessionCommand(endSessionParams);
           await ssm.send(terminateSessionCommand);
-
-          return {statusCode: 200, body: commandResult}
+          return {statusCode: 200, body: getCommandInvocationResponse}
         }
       } catch (err) {
         console.error(err)

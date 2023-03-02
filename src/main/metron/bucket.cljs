@@ -23,9 +23,12 @@
 
 (defn ensure-no-pong []
   (with-promise out
-    (take! (s3/delete-object *bucket-name* "PONG.edn")
+    (take! (s3/delete-object *bucket-name* "pong.edn")
       (fn [[err :as res]] ; "NoSuchKey"
         (put! out [nil])))))
 
 (defn wait-for-pong []
-  (s3/wait-for-exists *bucket-name* "PONG.edn"))
+  (s3/wait-for-exists *bucket-name* "pong.edn"))
+
+(defn put-object [key value]
+  (s3/put-object *bucket-name* key value))
