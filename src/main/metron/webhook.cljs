@@ -315,8 +315,11 @@
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (pipe1 (bkt/put-object "metron_server.js" (io/slurp "dist/metron_server.js"))
-                 out))))))
+          (take! (io/aslurp "dist/metron_server.js")
+            (fn [[err ok :as res]]
+              (if err
+                (put! out res)
+                (pipe1 (bkt/put-object "metron_server.js" ok) out)))))))))
 
 (defn run-script [cmd]
   (with-promise out
