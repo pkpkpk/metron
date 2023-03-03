@@ -11,6 +11,25 @@
 (defn local-dir-path [{:keys [full_name]}]
   (.join path "metron_repos" full_name))
 
+(defn build [{:keys [after] :as event}]
+  (println "building container... " after)
+  (proc/aexec (str "sudo -u ec2-user docker build -t " after " ." )
+              {:encoding "utf8"
+               :cwd (local-dir-path event)}))
+
+(defn run [{:keys [after] :as event}]
+  (println "running container... " after)
+  (proc/aexec (str "sudo -u ec2-user docker run " after)
+              {:encoding "utf8"
+               :cwd (local-dir-path event)}))
+
 (defn process-event [{:keys [] :as event}]
+  (println "starting docker")
   (with-promise out
-    (put! out [nil {:msg ""}])))
+    (if-not (.exists (io/file (local-dir-path event) "Dockerfile"))
+      (put! out [{:msg "At this time Metron expects a Dockerfile to run the task"}])
+      (take! (build event)
+        (fn [[err ok :as res]]
+          (if err
+            (put! out res)
+            (pipe1 (run event) out)))))))

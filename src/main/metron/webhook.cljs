@@ -167,11 +167,6 @@
                                       :last-event last-event}])
                           (put! out res))))))))))))))
 
-; (defn update-webhook-cmd [])
-; (defn update-lambda [])
-
-#!==============================================================================
-
 (defn generate-deploy-key [iid]
   (with-promise out
     (let [script (io/slurp "assets/scripts/keygen.sh")]
@@ -319,7 +314,7 @@
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (pipe1 (bkt/put-object "metron_server.js" (io/slurp "metron_server.js"))
+          (pipe1 (bkt/put-object "metron_server.js" (io/slurp "dist/metron_server.js"))
                  out))))))
 
 (defn run-script [cmd]
@@ -330,11 +325,16 @@
           (put! out res)
           (pipe1 (ssm/run-script ok cmd) out))))))
 
-(defn upload-metron-server-to-instance []
-  (run-script "aws s3 cp s3://metronbucket/metron_server.js metron_server.js"))
+(defn setup-server []
+  (with-promise out
+    (take! (run-script "aws s3 cp s3://metronbucket/metron_server.js metron_server.js")
+      (fn [[err :as res]]
+        (if err
+          (put! out res) ;;work around for npm bullshit during userdata
+          (pipe1 (run-script "npm install aws-sdk") out))))))
 
-(defn install-aws-sdk [] ;;work around for npm bullshit during userdata
-  (run-script "npm install aws-sdk"))
+; (defn set-shutdown []
+;   (with-promise out))
 
 (defn create-webhook-stack
   [{:keys [key-pair-name] :as opts}]
@@ -354,14 +354,10 @@
                     (fn [[err outputs :as res]]
                       (if err
                         (put! out res)
-                        (take! (upload-metron-server-to-instance)
+                        (take! (setup-server)
                           (fn [[err :as res]]
                             (if err
                               (put! out res)
-                              (take! (install-aws-sdk)
-                                (fn [[err :as res]]
-                                  (if err
-                                    (put! out res)
-                                    (pipe1 (configure-webhook outputs) out)))))))))))))))))))
+                              (pipe1 (configure-webhook outputs) out))))))))))))))))
 
 (defn delete-webhook [arg] (delete-stack arg))

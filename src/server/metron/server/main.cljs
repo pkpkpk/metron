@@ -50,7 +50,7 @@
    (js/process.exit code)))
 
 (defn report-results [[err ok :as res]]
-  (io/spit "last-result.edn" (pp res))
+  (io/spit "result.edn" (pp res))
   (take! (put-object "result.edn" (pp res))
     (fn [_]
       (if err
@@ -71,17 +71,18 @@
          (fn [[err ok :as res]]
            (if err
              (report-results res)
-             (take! (d/process-event ok) report-results))))
+             (take! (d/process-event event) report-results))))
       (catch js/Error err
         (report-results [{:msg "Uncaught error"
                           :cause err}])))))
 
 (defn -main
   [raw-event]
-  (io/spit "last_event.json" raw-event)
-  (take! (put-object "last_event.json" raw-event)
+  (io/spit "event.json" raw-event)
+  (take! (put-object "event.json" raw-event)
     (fn [_]
       (let [{:keys [x-github-event ref] :as event} (parse-event raw-event)]
+        (io/spit "event.edn" (pp event))
         (case x-github-event
           "ping" (handle-ping event)
           "push" (handle-push event)
