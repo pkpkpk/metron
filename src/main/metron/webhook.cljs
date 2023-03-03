@@ -232,7 +232,8 @@
   (println "")
   (println "1) go to https://github.com/:user/:repo/settings/hooks")
   (println "2) click 'Add webhook'")
-  (println "3) In the 'Payload URL' field enter '" (str (subs WebhookUrl 0 (dec (alength WebhookUrl))) "?branch=metron") "'")
+  ; (println "3) In the 'Payload URL' field enter '" (str (subs WebhookUrl 0 (dec (alength WebhookUrl))) "?branch=metron") "'")
+  (println "3) In the 'Payload URL' field enter '" WebhookUrl "'")
   (println "4) In the 'Content type' select menu choose 'application/json'")
   (println "5) In the 'Secret' field enter (without quotes): '" WebhookSecret "'")
   (println "6) Choose 'Just the push event' and click Add webhook to finish")
@@ -245,10 +246,12 @@
     (go-loop []
       (webhook-secret-prompt opts)
       (<! (util/get-acknowledgment))
-      (println "waiting for s3://metronbucket/pong.edn ...")
+      (println "waiting for ping response -> s3://metronbucket/pong.edn ...")
+      ;; TODO look for push events to skip work
       (let [[err ok :as res] (<! (verify-webhook-ping))]
         (if (nil? err)
           (do
+            (<! (bkt/delete-pong))
             (println "Webhook ping successfully processed!")
             (put! out res))
           (do
@@ -257,10 +260,29 @@
             (println " - remember to set payload content-type to application/json")
             (recur)))))))
 
-(defn configure-git-remote [pong-event {:as opts}]
-  (println "configuring as remote git repository...")
+(defn push-event-prompt [{:as opts}]
+  (println "")
+  (println "On the metron branch of the configured repo trigger a push event:")
+  (println "  git commit --allow-empty -m \"Empty-Commit\"")
+  (println ""))
+
+(defn verify-webhook-push [] (bkt/wait-for-result))
+
+(defn confirm-push-event [pong-event {:as opts}]
   (with-promise out
-    (put! out [nil])))
+    (go-loop []
+      (<! (bkt/delete-result))
+      (push-event-prompt opts)
+      (<! (util/get-acknowledgment))
+      (println "waiting for s3://metronbucket/result.edn ...")
+      (let [[err ok :as res] (<! (verify-webhook-push))]
+        (if (nil? err)
+          (do
+            (println "Webhook push successfully processed!")
+            (pipe1 (bkt/get-result) out))
+          (do
+            (println "Failed to process push: " (.-message err))
+            (recur)))))))
 
 (defn configure-webhook
   ([]
@@ -280,7 +302,7 @@
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (take! (bkt/ensure-no-pong)
+          (take! (bkt/delete-pong)
             (fn [[err ok :as res]]
               (if err
                 (put! out res)
@@ -288,9 +310,8 @@
                   (fn [[err pong-event :as res]]
                     (if err
                       (put! out res)
-                      (take! (configure-git-remote pong-event opts)
-                        (fn [[err ok :as res]]
-                          (put! out res)))))))))))))))
+                      (pipe1 (confirm-push-event pong-event opts) out)))))))))))))
+                      ;;TODO now configure shutdown
 
 (defn setup-bucket [opts]
   (with-promise out
@@ -301,23 +322,19 @@
           (pipe1 (bkt/put-object "metron_server.js" (io/slurp "metron_server.js"))
                  out))))))
 
+(defn run-script [cmd]
+  (with-promise out
+    (take! (instance-id)
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (pipe1 (ssm/run-script ok cmd) out))))))
+
 (defn upload-metron-server-to-instance []
-  (let [cmd "aws s3 cp s3://metronbucket/metron_server.js metron_server.js"]
-    (with-promise out
-      (take! (instance-id)
-        (fn [[err ok :as res]]
-          (if err
-            (put! out res)
-            (pipe1 (ssm/run-script ok cmd) out)))))))
+  (run-script "aws s3 cp s3://metronbucket/metron_server.js metron_server.js"))
 
 (defn install-aws-sdk [] ;;work around for npm bullshit during userdata
-  (let [cmd "npm install aws-sdk"]
-    (with-promise out
-      (take! (instance-id)
-        (fn [[err ok :as res]]
-          (if err
-            (put! out res)
-            (pipe1 (ssm/run-script ok cmd) out)))))))
+  (run-script "npm install aws-sdk"))
 
 (defn create-webhook-stack
   [{:keys [key-pair-name] :as opts}]
@@ -347,8 +364,4 @@
                                     (put! out res)
                                     (pipe1 (configure-webhook outputs) out)))))))))))))))))))
 
-(defn delete-webhook [arg]
-  (with-promise out
-    (take! (delete-stack arg)
-      (fn [[err ok :as res]]
-        (put! out res)))))
+(defn delete-webhook [arg] (delete-stack arg))

@@ -51,7 +51,7 @@
 
 (defn report-results [[err ok :as res]]
   (io/spit "last-result.edn" (pp res))
-  (take! (put-object "results.edn" (pp res))
+  (take! (put-object "result.edn" (pp res))
     (fn [_]
       (if err
         (exit 1 (.-message err))
