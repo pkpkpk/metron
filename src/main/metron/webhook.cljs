@@ -8,8 +8,9 @@
             [metron.aws.ec2 :as ec2]
             [metron.aws.cloudformation :as cf]
             [metron.aws.ssm :as ssm]
-            [metron.keypair :as kp]
             [metron.bucket :refer [ensure-bucket] :as bkt]
+            [metron.keypair :as kp]
+            [metron.aws.lambda :as lam]
             [metron.util :refer [*debug* dbg pipe1] :as util]))
 
 (def path (js/require "path"))
@@ -333,8 +334,17 @@
           (put! out res) ;;work around for npm bullshit during userdata
           (pipe1 (run-script "npm install aws-sdk") out))))))
 
-; (defn set-shutdown []
-;   (with-promise out))
+(defn shutdown []
+  (with-promise out
+    (take! (lam/set-env-entry "metron_webhook_lambda" "SHOULD_SHUTDOWN_INSTANCE" "true")
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (take! (stop-instance)
+            (fn [[err ok :as res]]
+              (if err
+                (put! out res)
+                (put! out [nil "Webhook creation complete"])))))))))
 
 (defn create-webhook-stack
   [{:keys [key-pair-name] :as opts}]
@@ -358,6 +368,10 @@
                           (fn [[err :as res]]
                             (if err
                               (put! out res)
-                              (pipe1 (configure-webhook outputs) out))))))))))))))))
+                              (take! (configure-webhook outputs)
+                                (fn [[err ok :as res]]
+                                  (if err
+                                    (put! out res)
+                                    (pipe1 (shutdown) out)))))))))))))))))))
 
 (defn delete-webhook [arg] (delete-stack arg))

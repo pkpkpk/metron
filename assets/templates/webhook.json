@@ -63,7 +63,8 @@
       "Description" : "Public http endpoint for github to call",
       "Value" : { "Fn::GetAtt" : [ "WebhookUrl", "FunctionUrl" ] }
     },
-    "WebhookSecret": {"Value" : {"Ref" : "WebhookSecret"}}
+    "WebhookSecret": {"Value" : {"Ref" : "WebhookSecret"}},
+    "WebhookLambda": {"Value" : {"Ref" : "WebhookLambda"}}
   },
 
   "Resources" : {
