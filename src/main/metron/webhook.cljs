@@ -20,7 +20,7 @@
 (defn describe-stack []
   "assumes single stack"
   (with-promise out
-    (take! (cf/describe-stacks "metron-stack")
+    (take! (cf/describe-stack "metron-webhook-stack")
       (fn [[err ok :as res]]
         (if (some? err)
           (put! out res)
@@ -30,11 +30,13 @@
   (with-promise out
     (take! (describe-stack)
       (fn [[err {:keys [Outputs] :as ok} :as res]]
-        (let [m (into {}
-                      (map (fn [{:keys [OutputKey OutputValue]}]
-                             [(keyword OutputKey) OutputValue]))
-                      Outputs)]
-          (put! out [nil m]))))))
+        (if err
+          (put! out res)
+          (let [m (into {}
+                        (map (fn [{:keys [OutputKey OutputValue]}]
+                               [(keyword OutputKey) OutputValue]))
+                        Outputs)]
+            (put! out [nil m])))))))
 
 (defn instance-id []
   (with-promise out
@@ -50,11 +52,7 @@
       (fn [[err {:keys [InstanceId] :as ok} :as res]]
         (if (some? err)
           (put! out res)
-          (take! (ec2/describe-instance InstanceId)
-            (fn [[err ok :as res]]
-              (if err
-                (put! out res)
-                (put! out [nil (get-in ok [:Reservations 0 :Instances 0])])))))))))
+          (pipe1 (ec2/describe-instance InstanceId) out))))))
 
 (defn instance-state []
   (with-promise out
@@ -115,7 +113,7 @@
                       "ParameterValue" secret}
         wh-src #js{"ParameterKey" "WebhookSrc"
                    "ParameterValue" (io/slurp (.join path *asset-path* "js" "lambda.js"))}]
-    {:StackName "metron-stack"
+    {:StackName "metron-webhook-stack"
      :Capabilities #js["CAPABILITY_IAM" "CAPABILITY_NAMED_IAM"]
      :TemplateBody (io/slurp (.join path *asset-path* "templates" "webhook.json"))
      :Parameters [keypair wh-secret wh-src]}))
@@ -127,7 +125,7 @@
         (if err
           (put! out res)
           (do
-            (println "Creating metron-stack " sid)
+            (println "Creating metron-webhook-stack " sid)
             (take! (cf/observe-stack-creation sid)
               (fn [[err last-event :as res]]
                 (if err
@@ -140,8 +138,9 @@
                         (if err
                           (put! out [{:msg "Failed retrieving creation failure"
                                       :cause err}])
-                          (put! out [{:msg "Failed creating webhook stack"
-                                      :cause ok}]))))))))))))))
+                          (let [msg (get-in ok [0 :ResourceStatusReason])]
+                            (put! out [{:msg (str "Failed creating webhook stack: " msg)
+                                        :cause ok}])))))))))))))))
 
 (defn delete-stack [_]
   (with-promise out
@@ -156,7 +155,7 @@
               (if err
                 (put! out res)
                 (do
-                  (println "Deleting metron-stack " sid)
+                  (println "Deleting metron-webhook-stack " sid)
                   (take! (cf/observe-stack-deletion sid)
                     (fn [[err last-event :as res]]
                       (if err
@@ -355,7 +354,8 @@
     (take! (setup-bucket opts)
       (fn [[err ok :as res]]
         (if err
-          (put! out res)
+          (put! out [{:msg "metron.webhook/setup-bucket failed"
+                      :cause err}])
           (take! (do (println "metronbucket OK")
                      (kp/validate-keypair key-pair-name))
             (fn [[err ok :as res]]

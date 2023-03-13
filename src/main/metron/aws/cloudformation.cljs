@@ -5,37 +5,48 @@
             [metron.aws :refer [AWS]]
             [metron.util :refer [dbg]]))
 
-(def CF (new (.-CloudFormation AWS) #js{:apiVersion "2010-05-15"}))
+(def CF (js/require "@aws-sdk/client-cloudformation"))
+(def client (new (.-CloudFormationClient CF)))
+(defn send [cmd] (edn-res-chan (.send client cmd)))
 
 (defn create-stack [params]
-  (edn-res-chan (.createStack CF (clj->js params))))
-
-(defn wait-for-create [stack-name]
-  (edn-res-chan (.waitFor CF "stackCreateComplete" #js{:StackName stack-name})))
+  (send (new (.-CreateStackCommand CF) (clj->js params))))
 
 (defn update-stack [params]
-  (edn-res-chan (.updateStack CF (clj->js params))))
-
-(defn wait-for-update [stack-name]
-  (edn-res-chan (.waitFor CF "stackUpdateComplete" #js{:StackName stack-name})))
-
-(defn describe-stacks [stack-name]
-  (edn-res-chan  (.describeStacks CF #js{:StackName (str stack-name)})))
-
-(defn wait-for-delete [stack-name]
-  (edn-res-chan (.waitFor CF "stackDeleteComplete" #js{:StackName stack-name})))
-
-(defn validate-template [template-body]
-  (edn-res-chan (.validateTemplate CF #js{:TemplateBody (str template-body)})))
+  (send (new (.-UpdateStackCommand CF) (clj->js params))))
 
 (defn delete-stack [stack-name]
-  (edn-res-chan (.deleteStack CF #js{:StackName (str stack-name)})))
+  (send (new (.-DeleteStackCommand CF) #js{:StackName (str stack-name)})))
+
+(defn describe-stacks []
+  (send (new (.-DescribeStacksCommand CF) #js{})))
+
+(defn describe-stack [stack-name]
+  (send (new (.-DescribeStacksCommand CF) #js{:StackName (str stack-name)})))
+
+(defn validate-template [template-body]
+  (send (new (.-ValidateTemplateInput CF) #js{:TemplateBody (str template-body)})))
 
 (defn describe-stack-events
   ([stack-name] (describe-stack-events stack-name nil))
   ([stack-name next-token]
-   (edn-res-chan (.describeStackEvents CF #js{:StackName (str stack-name)
-                                              :NextToken next-token}))))
+   (send (new (.-DescribeStackEventsCommand CF) #js{:StackName (str stack-name)
+                                                    :NextToken next-token}))))
+
+(defn wait-for-create [stack-name]
+  (edn-res-chan (.waitUntilStackCreateComplete CF #js{:StackName stack-name})))
+
+(defn wait-for-update [stack-name]
+  (edn-res-chan (.waitUntilStackUpdateComplete CF #js{:StackName stack-name})))
+
+(defn wait-for-delete [stack-name]
+  (edn-res-chan (.waitUntilStackDeleteComplete CF #js{:StackName stack-name})))
+
+(defn wait-for-import [stack-name]
+  (edn-res-chan (.waitUntilStackImportComplete CF #js{:StackName stack-name})))
+
+(defn wait-for-rollback [stack-name]
+  (edn-res-chan (.waitUntilStackRollbackComplete CF #js{:StackName stack-name})))
 
 (def ^:dynamic *poll-interval* 9000)
 
@@ -50,6 +61,8 @@
         (if err
           (put! out res)
           (let [stack (sort-by :Timestamp (filter (or filter-fn any?) (get ok :StackEvents)))]
+            ;; TODO check for NextToken
+            ;; https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/clients/client-cloudformation/interfaces/describestackeventscommandoutput.html#nexttoken
             (doseq [{resource :ResourceType,
                      state :ResourceStatus, :as event} stack]
               (when (and (= resource "AWS::CloudFormation::Stack")(end-states state))
@@ -89,5 +102,6 @@
         (if err
           (put! out res)
           (let [stack (get ok :StackEvents)
-                target (filter #(= (:ResourceStatus %) "CREATE_FAILED") stack)]
+                target (filterv #(and (= (:ResourceStatus %) "CREATE_FAILED")
+                                      (not (string/includes? (:ResourceStatusReason %) "cancelled"))) stack)]
             (put! out [nil target])))))))

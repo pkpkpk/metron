@@ -14,12 +14,29 @@
 (nodejs/enable-util-print!)
 
 (defn exit [status data]
-  (let [msg  (if (string? data)
+  (let [msg (cond
+              (string? data)
                data
-               (pp data))]
+
+              (instance? js/Error data)
+              (.-message data)
+
+              (:msg data)
+              (:msg data)
+
+               true
+              (pp data))]
     (if (zero? status)
       (.write (.-stdout js/process) msg)
-      (.write (.-stderr js/process) msg))
+      (let [s (str "metron_error_" (subs (util/random-string) 0 11))]
+        (.write (.-stderr js/process) msg)
+        (if (instance? js/Error data)
+          (let [f (cljs-node-io.file/createTempFile s ".tmp")]
+            (println "\nmore info in " (.getPath f))
+            (io/spit f (.-stack data)))
+          (let [f (cljs-node-io.file/createTempFile s ".edn")]
+            (println "\nmore info in " (.getPath f))
+            (io/spit f (pp data))))))
     (.exit js/process status)))
 
 (defn usage [options-summary]
@@ -99,10 +116,14 @@
        :opts options
        :exit-message (usage summary) :ok? true})))
 
+(defn resolve-region []
+  (goog.object.get (.-env js/process) "AWS_REGION"))
+
 (defn -main [& args]
-  (let [{:keys [action opts exit-message ok?] :as arg} (validate-args args)]
+  (let [{:keys [action opts exit-message ok?] :as arg} (validate-args args)
+        region (resolve-region)]
     (cond
-      (nil? (goog.object.get (.-env js/process) "AWS_REGION"))
+      (nil? region)
       (exit 1 "please run with AWS_REGION set")
 
       (some? exit-message)
@@ -113,7 +134,8 @@
 
       true
       (go
-       (let [opts (assoc opts :region (goog.object.get (.-env js/process) "AWS_REGION"))
+       (let [opts (assoc opts :region region)
+             _(println "region " region)
              [err ok :as res] (<! (case action
                                     ::create-webhook (wh/create-webhook-stack opts)
                                     ::configure-webhook (wh/configure-webhook)

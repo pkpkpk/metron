@@ -19,13 +19,19 @@
                         :cause err}])
             (do
               (println "Creating metron bucket")
-              (pipe1 (s3/create-bucket *bucket-name* (:region args)) out))))))))
+              (take! (s3/create-bucket *bucket-name* (:region args))
+                (fn [[err ok :as res]]
+                  (if err
+                    (put! out res)
+                    (do
+                      (println "waiting for bucket...")
+                      (pipe1 (s3/wait-for-bucket-exists *bucket-name*) out))))))))))))
 
 (defn delete-pong []
   (s3/delete-object *bucket-name* "pong.edn"))
 
 (defn wait-for-pong []
-  (s3/wait-for-exists *bucket-name* "pong.edn"))
+  (s3/wait-for-object-exists *bucket-name* "pong.edn"))
 
 (defn get-result []
   (s3/get-object *bucket-name* "result.edn"))
@@ -34,7 +40,7 @@
   (s3/delete-object *bucket-name* "result.edn"))
 
 (defn wait-for-result []
-  (s3/wait-for-exists *bucket-name* "result.edn"))
+  (s3/wait-for-object-exists *bucket-name* "result.edn"))
 
 (defn put-object [key value]
   (s3/put-object *bucket-name* key value))

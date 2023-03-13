@@ -7,21 +7,26 @@
 (def ^:dynamic *poll-interval* 3000)
 (def ^:dynamic *max-retries* 10)
 
-(def SSM (new (.-SSM AWS) #js{:apiVersion "2014-11-06"}))
+(def SSM (js/require "@aws-sdk/client-ssm"))
+(def client (new (.-SSMClient SSM)))
+(defn send [cmd] (edn-res-chan (.send client cmd)))
 
+(defn describe-instance-info []
+  (send (new (.-DescribeInstanceInformationCommand SSM) #js{})))
 
 (defn send-script-cmd [instance cmd]
-  (edn-res-chan (.sendCommand SSM #js{:DocumentName "AWS-RunShellScript"
-                                      :InstanceIds #js[instance]
-                                      :Parameters #js{:commands (if (string? cmd)
-                                                                  #js[cmd]
-                                                                  (into-array cmd))
-                                                      :workingDirectory #js["/home/ec2-user"]}})))
+  (send (new (.-SendCommandCommand SSM) #js{:DocumentName "AWS-RunShellScript"
+                                            :InstanceIds #js[instance]
+                                            :Parameters #js{:commands (if (string? cmd)
+                                                                        #js[cmd]
+                                                                        (into-array cmd))
+                                                            :workingDirectory #js["/home/ec2-user"]}})))
 
 (defn get-command-invocation [iid cid]
-  (edn-res-chan (.getCommandInvocation SSM #js{:InstanceId iid :CommandId cid})))
+  (send (new (.-GetCommandInvocationCommand SSM) #js{:InstanceId iid :CommandId cid})))
 
 (defn wait-for-command [iid cid]
+  ; https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/clients/client-ssm/globals.html#waituntilcommandexecuted
   (let [_retries (atom *max-retries*)]
     (go-loop [[err {status :Status :as ok} :as res] (<! (get-command-invocation iid cid))]
       (cond
@@ -45,6 +50,3 @@
           (put! out res)
           (let [cid (get-in ok [:Command :CommandId])]
             (pipe1 (wait-for-command iid cid) out)))))))
-
-(defn describe-instance-info []
-  (edn-res-chan (.describeInstanceInformation SSM #js{})))
