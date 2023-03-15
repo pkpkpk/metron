@@ -3,11 +3,12 @@
   (:require [cljs.core.async :refer [promise-chan put! take!]]
             [metron.aws :refer [AWS]]))
 
-; (def EC2 (new (.-EC2 AWS) #js{:apiVersion "2016-11-15"}))
-
 (def EC2 (js/require "@aws-sdk/client-ec2"))
 (def client (new (.-EC2Client EC2)))
 (defn send [cmd] (edn-res-chan (.send client cmd)))
+
+(def ^:dynamic *poll-delay* 15)
+(def ^:dynamic *max-wait-time* 500)
 
 (defn describe-key-pairs
   "Describes the specified key pairs or all of your key pairs."
@@ -51,11 +52,29 @@
 (defn stop-instance [iid]
   (send (new (.-StopInstancesCommand EC2) #js{:InstanceIds #js[iid]})))
 
+(defn p->res [p]
+  (with-promise out
+    (.then p
+          #(put! out (cond-> [nil] (some? %) (conj (cljs.core/js->clj % :keywordize-keys true))))
+          #(put! out [(cljs.core/js->clj % :keywordize-keys true)]))))
+
 (defn wait-for-running [iid]
-  (edn-res-chan (.waitUntilInstanceRunning EC2 #js{:InstanceIds #js[iid]})))
+  (p->res (.waitUntilInstanceRunning EC2
+                                     #js{:client client
+                                         :maxDelay *poll-delay*
+                                         :maxWaitTime *max-wait-time*}
+                                     #js{:InstanceIds #js[iid]})))
 
 (defn wait-for-ok [iid]
-  (edn-res-chan (.waitUntilInstanceStatusOk EC2 #js{:InstanceIds #js[iid]})))
+  (p->res (.waitUntilInstanceStatusOk EC2
+                                      #js{:client client
+                                          :maxDelay *poll-delay*
+                                          :maxWaitTime *max-wait-time*}
+                                      #js{:InstanceIds #js[iid]})))
 
 (defn wait-for-stopped [iid]
-  (edn-res-chan (.waitUntilInstanceStopped EC2 #js{:InstanceIds #js[iid]})))
+  (p->res (.waitUntilInstanceStopped EC2
+                                     #js{:client client
+                                         :maxDelay *poll-delay*
+                                         :maxWaitTime *max-wait-time*}
+                                     #js{:InstanceIds #js[iid]})))

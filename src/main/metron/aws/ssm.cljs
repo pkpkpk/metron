@@ -1,8 +1,7 @@
 (ns metron.aws.ssm
   (:require-macros [metron.macros :refer [edn-res-chan with-promise]])
   (:require [cljs.core.async :refer [promise-chan put! take! go-loop <! timeout]]
-            [metron.aws :refer [AWS]]
-            [metron.util :refer [pipe1]]))
+            [metron.util :refer [pipe1 *region*]]))
 
 (def ^:dynamic *poll-interval* 3000)
 (def ^:dynamic *max-retries* 10)
@@ -22,6 +21,9 @@
                                                                         (into-array cmd))
                                                             :workingDirectory #js["/home/ec2-user"]}})))
 
+; #js[(str "export AWS_REGION=" *region*) cmd]
+; (into-array (into [(str "export AWS_REGION=" *region*)] cmd))
+
 (defn get-command-invocation [iid cid]
   (send (new (.-GetCommandInvocationCommand SSM) #js{:InstanceId iid :CommandId cid})))
 
@@ -30,7 +32,14 @@
   (let [_retries (atom *max-retries*)]
     (go-loop [[err {status :Status :as ok} :as res] (<! (get-command-invocation iid cid))]
       (cond
-        (some? err) res
+        (some? err)
+        (if-not (= (.-name err) "InvocationDoesNotExist")
+          res
+          (do
+            (<! (timeout *poll-interval*))
+            (swap! _retries dec)
+            (recur (<! (get-command-invocation iid cid)))))
+
         (= "Success" status) res
         (#{"Failed" "Cancelled"} status) [ok]
 

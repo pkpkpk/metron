@@ -7,8 +7,8 @@
             [cljs.pprint :refer [pprint]]
             [clojure.string :as string]
             [goog.object]
+            [metron.aws :as aws]
             [metron.aws.s3 :as s3]
-            [metron.aws.ec2 :as ec2]
             [metron.git :as g]
             [metron.docker :as d]
             [metron.util :as util :refer [*debug* pp]]))
@@ -61,7 +61,7 @@
   (take! (put-object "pong.edn" (pp event))
     (fn [[err ok :as res]]
       (if err
-        (exit 1 (.-message err))
+        (exit 1 (hash-map :msg (str "handle-ping put-object error: " (.-message err)) :stack (.-stack err)))
         (exit 0)))))
 
 (defn handle-push [{:as event}]
@@ -78,15 +78,18 @@
 
 (defn -main
   [raw-event]
-  (io/spit "event.json" raw-event)
-  (take! (put-object "event.json" raw-event)
-    (fn [_]
-      (let [{:keys [x-github-event ref] :as event} (parse-event raw-event)]
-        (io/spit "event.edn" (pp event))
-        (case x-github-event
-          "ping" (handle-ping event)
-          "push" (handle-push event)
-          (report-results [{:msg (str "unrecognized event '" x-github-event "'")}]))))))
+  (if (not (goog.object.get (.-env js/process) "AWS_REGION"))
+    (exit 1 [{:msg "please run with AWS_REGION set"}])
+    (take! (do
+             (io/spit "event.json" raw-event)
+             (put-object "event.json" raw-event))
+           (fn [_]
+             (let [{:keys [x-github-event ref] :as event} (parse-event raw-event)]
+               (io/spit "event.edn" (pp event))
+               (case x-github-event
+                 "ping" (handle-ping event)
+                 "push" (handle-push event)
+                 (report-results [{:msg (str "unrecognized event '" x-github-event "'")}])))))))
 
 (.on js/process "uncaughtException"
   (fn [err origin]

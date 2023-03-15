@@ -45,14 +45,11 @@ exports.handler = async(event, _ctx) => {
         const startSessionCommand = new StartSessionCommand({Target: instanceId});
         const startSessionData = await ssm.send(startSessionCommand);
         const sessionId = startSessionData.SessionId;
-        var cmds = [`node metron_server.js '${JSON.stringify(event)}'`];
+        var cmds = ["export AWS_REGION="+region,`node metron_server.js '${JSON.stringify(event)}'`];
         if (shouldShutdownInstance){ cmds.push('shutdown -h now') };
         const sendCommandParams = {
           DocumentName: 'AWS-RunShellScript',
-          Parameters: {
-            workingDirectory: ["/home/ec2-user"],
-            commands: cmds
-          },
+          Parameters: {workingDirectory: ["/home/ec2-user"],commands: cmds},
           Targets: [{Key: 'InstanceIds', Values: [instanceId]}]
         };
         const sendCommandCommand = new SendCommandCommand(sendCommandParams);

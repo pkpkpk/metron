@@ -78,9 +78,9 @@
             (put! out res)
             (if (= "running" ok)
               (put! out res)
-              (take! (ec2/start-instance iid)
+              (take! (do (println "starting instance...") (ec2/start-instance iid))
                 (fn [_]
-                  (println "Waiting for instance " iid)
+                  (println "Waiting for instance ok" iid)
                   (pipe1 (ec2/wait-for-ok iid) out))))))))))
 
 (def start-instance wait-for-instance)
@@ -234,8 +234,6 @@
   (println "6) Choose 'Just the push event' and click Add webhook to finish")
   (println ""))
 
-(defn verify-webhook-ping [] (bkt/wait-for-pong))
-
 (defn prompt-webhook-secret-to-user [{ :as opts}]
   (with-promise out
     (go-loop []
@@ -243,7 +241,7 @@
       (<! (util/get-acknowledgment))
       (println "waiting for ping response -> s3://metronbucket/pong.edn ...")
       ;; TODO look for push events to skip work
-      (let [[err ok :as res] (<! (verify-webhook-ping))]
+      (let [[err ok :as res] (<! (bkt/wait-for-pong))]
         (if (nil? err)
           (do
             (<! (bkt/delete-pong))
@@ -306,7 +304,6 @@
                     (if err
                       (put! out res)
                       (pipe1 (confirm-push-event pong-event opts) out)))))))))))))
-                      ;;TODO now configure shutdown
 
 (defn setup-bucket [opts]
   (with-promise out
@@ -334,7 +331,8 @@
       (fn [[err :as res]]
         (if err
           (put! out res) ;;work around for npm bullshit during userdata
-          (pipe1 (run-script "npm install aws-sdk") out))))))
+          (pipe1 (run-script ["npm install aws-sdk";;to dodge region bs
+                              "npm install @aws-sdk/client-s3"]) out))))))
 
 (defn shutdown []
   (with-promise out

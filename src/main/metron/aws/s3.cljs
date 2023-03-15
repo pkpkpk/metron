@@ -1,7 +1,6 @@
 (ns metron.aws.s3
   (:require-macros [metron.macros :refer [with-promise edn-res-chan]])
-  (:require [cljs.core.async :refer [promise-chan put! take!]]
-            [metron.aws :refer [AWS]]))
+  (:require [cljs.core.async :refer [promise-chan put! take!]]))
 
 (def S3 (js/require "@aws-sdk/client-s3"))
 (def client (new (.-S3Client S3)))
@@ -26,6 +25,9 @@
 (defn head-bucket [bucket-name]
   (send (new (.-HeadBucketCommand S3) #js{"Bucket" bucket-name})))
 
+(defn head-object [bucket-name key]
+  (send (new (.-HeadObjectCommand S3) #js{"Bucket" bucket-name "Key" key})))
+
 (defn put-object
   ([bucket-name key obj]
    (send (new (.-PutObjectCommand S3) #js{:Bucket bucket-name :Key key :Body obj})))
@@ -41,8 +43,27 @@
 (defn delete-object [bucket-name key]
   (send (new (.-DeleteObjectCommand S3) #js{:Bucket bucket-name :Key key})))
 
+#!==============================================================================
+
+(def ^:dynamic *poll-delay* 5)
+(def ^:dynamic *max-wait-time* 500)
+
+(defn p->res [p]
+  (with-promise out
+    (.then p
+           #(put! out (cond-> [nil] (some? %) (conj (cljs.core/js->clj % :keywordize-keys true))))
+           #(put! out [(cljs.core/js->clj % :keywordize-keys true)]))))
+
 (defn wait-for-bucket-exists [bucket-name]
-  (edn-res-chan (.waitUntilBucketExists S3 #js{:Bucket bucket-name})))
+  (p->res (.waitUntilBucketExists S3 #js{:client client
+                                         :maxDelay *poll-delay*
+                                         :maxWaitTime *max-wait-time*}
+                                     #js{:Bucket bucket-name})))
 
 (defn wait-for-object-exists [bucket-name key]
-  (edn-res-chan (.waitUntilObjectExists S3 #js{:Bucket bucket-name :Key key})))
+  (p->res (.waitUntilObjectExists S3
+                                  #js{:client client
+                                      :maxDelay *poll-delay*
+                                      :maxWaitTime *max-wait-time*}
+                                  #js{:Bucket bucket-name
+                                      :Key key})))

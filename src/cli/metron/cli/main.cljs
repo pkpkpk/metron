@@ -19,7 +19,7 @@
                data
 
               (instance? js/Error data)
-              (.-message data)
+              (str (.-name data) " : " (.-message data))
 
               (:msg data)
               (:msg data)
@@ -28,7 +28,7 @@
               (pp data))]
     (if (zero? status)
       (.write (.-stdout js/process) msg)
-      (let [s (str "metron_error_" (subs (util/random-string) 0 11))]
+      (let [s (str "metron_error_" (js/Date.now))]
         (.write (.-stderr js/process) msg)
         (if (instance? js/Error data)
           (let [f (cljs-node-io.file/createTempFile s ".tmp")]
@@ -136,6 +136,7 @@
       (go
        (let [opts (assoc opts :region region)
              _(println "region " region)
+             _(set! util/*region* region)
              [err ok :as res] (<! (case action
                                     ::create-webhook (wh/create-webhook-stack opts)
                                     ::configure-webhook (wh/configure-webhook)

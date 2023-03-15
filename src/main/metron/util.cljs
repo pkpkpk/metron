@@ -5,6 +5,8 @@
             [cljs.pprint :refer [pprint]]
             [clojure.string :as string]))
 
+(def ^dynamic *region* "us-east-1")
+
 (defn pp [x](with-out-str (pprint x)))
 
 (defn pipe1 [a b]
