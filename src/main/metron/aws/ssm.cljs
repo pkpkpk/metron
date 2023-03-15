@@ -1,7 +1,7 @@
 (ns metron.aws.ssm
   (:require-macros [metron.macros :refer [edn-res-chan with-promise]])
   (:require [cljs.core.async :refer [promise-chan put! take! go-loop <! timeout]]
-            [metron.util :refer [pipe1 *region*]]))
+            [metron.util :refer [pipe1]]))
 
 (def ^:dynamic *poll-interval* 3000)
 (def ^:dynamic *max-retries* 10)
@@ -20,9 +20,6 @@
                                                                         #js[cmd]
                                                                         (into-array cmd))
                                                             :workingDirectory #js["/home/ec2-user"]}})))
-
-; #js[(str "export AWS_REGION=" *region*) cmd]
-; (into-array (into [(str "export AWS_REGION=" *region*)] cmd))
 
 (defn get-command-invocation [iid cid]
   (send (new (.-GetCommandInvocationCommand SSM) #js{:InstanceId iid :CommandId cid})))

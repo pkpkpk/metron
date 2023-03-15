@@ -35,7 +35,7 @@ exports.handler = async(event, _ctx) => {
       return {statusCode: 401, body: "bad signature"};
     } else {
       event.body = JSON.parse(event.body);
-      const event_type = event.headers["x-github-event"];
+      const event_type = event.headers["x-github-event"] === "ping");
       if (!((event_type === "ping") || ((event_type === "push") && (event.body.ref  === "refs/heads/metron")) )){
         return {status: 200, body: "no-op event"}
       }

@@ -4,7 +4,6 @@
                                      close! >! <! pipe]]
             [clojure.string :as string]
             [cljs-node-io.core :as io]
-            [metron.aws :refer [AWS]]
             [metron.aws.ec2 :as ec2]
             [metron.aws.cloudformation :as cf]
             [metron.aws.ssm :as ssm]
@@ -256,7 +255,9 @@
 (defn push-event-prompt [{:as opts}]
   (println "")
   (println "On the metron branch of the configured repo trigger a push event:")
-  (println "  git commit --allow-empty -m \"Empty-Commit\"")
+  (println "    git checkout -b metron")
+  (println "    git commit --allow-empty -m \"Empty-Commit\"")
+  (println "    git push <gh-remote> metron")
   (println ""))
 
 (defn verify-webhook-push [] (bkt/wait-for-result))

@@ -1,7 +1,6 @@
 (ns metron.aws.lambda
   (:require-macros [metron.macros :refer [with-promise edn-res-chan]])
   (:require [cljs.core.async :refer [promise-chan put! take!]]
-            [metron.aws :refer [AWS]]
             [metron.util :refer [pipe1]]))
 
 (def Lambda (js/require "@aws-sdk/client-lambda"))
@@ -26,12 +25,13 @@
 (defn set-env [fn-name env]
   (set-config fn-name {:Environment {:Variables env}}))
 
-(defn set-env-entry [fn-name key value]
+(defn set-env-entry
+  [fn-name & args]
   (with-promise out
     (take! (get-env fn-name)
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (let [env (assoc ok key value)]
+          (let [env (apply assoc ok args)]
             (pipe1 (set-env fn-name env) out)))))))
 

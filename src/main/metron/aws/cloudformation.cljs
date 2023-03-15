@@ -2,7 +2,6 @@
   (:require-macros [metron.macros :refer [edn-res-chan with-promise]])
   (:require [cljs.core.async :refer [promise-chan put! chan close! take! go-loop <! timeout]]
             [clojure.string :as string]
-            [metron.aws :refer [AWS]]
             [metron.util :refer [dbg]]))
 
 (def CF (js/require "@aws-sdk/client-cloudformation"))

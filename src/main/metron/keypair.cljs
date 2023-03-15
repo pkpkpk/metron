@@ -1,10 +1,8 @@
 (ns metron.keypair
   (:require-macros [metron.macros :refer [with-promise]])
-  (:require [cljs.core.async :refer [go go-loop chan promise-chan put! take!
-                                     close! >! <! pipe to-chan!]]
+  (:require [cljs.core.async :refer [promise-chan put! take!]]
             [clojure.string :as string]
             [cljs-node-io.core :as io]
-            [metron.aws :refer [AWS]]
             [metron.aws.ec2 :as ec2]
             [metron.util :refer [*debug* dbg pipe1 pp]]))
 

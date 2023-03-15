@@ -135,7 +135,7 @@
             "REGION" : { "Ref" : "AWS::Region" },
             "INSTANCE_ID" : {"Ref" : "EC2Instance"},
             "SHOULD_WAIT_FOR_INVOCATION" : false,
-            "SHOULD_SHUTDOWN_INSTANCE" : false,
+            "SHOULD_SHUTDOWN_INSTANCE" : false
           }
         }
       }

@@ -135,8 +135,7 @@
       true
       (go
        (let [opts (assoc opts :region region)
-             _(println "region " region)
-             _(set! util/*region* region)
+             ; _(println "region " region)
              [err ok :as res] (<! (case action
                                     ::create-webhook (wh/create-webhook-stack opts)
                                     ::configure-webhook (wh/configure-webhook)

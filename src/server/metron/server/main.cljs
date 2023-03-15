@@ -1,13 +1,12 @@
 (ns metron.server.main
   (:require-macros [metron.macros :refer [with-promise]])
-  (:require [cljs.core.async :refer [go go-loop chan promise-chan put! take! close! >! <! to-chan!]]
+  (:require [cljs.core.async :refer [promise-chan put! take!]]
             [cljs.nodejs :as nodejs]
             [cljs-node-io.core :as io]
             [cljs-node-io.proc :as proc]
             [cljs.pprint :refer [pprint]]
             [clojure.string :as string]
             [goog.object]
-            [metron.aws :as aws]
             [metron.aws.s3 :as s3]
             [metron.git :as g]
             [metron.docker :as d]
@@ -68,17 +67,17 @@
   (when (= (:ref event) "refs/heads/metron")
     (try
       (take! (g/fetch-event event)
-         (fn [[err ok :as res]]
-           (if err
-             (report-results res)
-             (take! (d/process-event event) report-results))))
+        (fn [[err ok :as res]]
+          (if err
+            (report-results res)
+            (take! (d/process-event event) report-results))))
       (catch js/Error err
         (report-results [{:msg "Uncaught error"
                           :cause err}])))))
 
 (defn -main
   [raw-event]
-  (if (not (goog.object.get (.-env js/process) "AWS_REGION"))
+  (if (nil? (goog.object.get (.-env js/process) "AWS_REGION"))
     (exit 1 [{:msg "please run with AWS_REGION set"}])
     (take! (do
              (io/spit "event.json" raw-event)

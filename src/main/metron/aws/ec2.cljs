@@ -1,7 +1,6 @@
 (ns metron.aws.ec2
   (:require-macros [metron.macros :refer [with-promise edn-res-chan]])
-  (:require [cljs.core.async :refer [promise-chan put! take!]]
-            [metron.aws :refer [AWS]]))
+  (:require [cljs.core.async :refer [promise-chan put! take!]]))
 
 (def EC2 (js/require "@aws-sdk/client-ec2"))
 (def client (new (.-EC2Client EC2)))
