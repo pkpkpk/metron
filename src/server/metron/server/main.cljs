@@ -7,7 +7,7 @@
             [cljs.pprint :refer [pprint]]
             [clojure.string :as string]
             [goog.object]
-            [metron.aws.s3 :as s3]
+            [metron.bucket :as bkt]
             [metron.git :as g]
             [metron.docker :as d]
             [metron.util :as util :refer [*debug* pp]]))
@@ -36,9 +36,6 @@
            :query-params (js->clj (.-queryStringParameters json) :keywordize-keys true)
            :x-github-event (goog.object.get (.. json -headers) "x-github-event"))))
 
-(defn put-object [key value]
-  (s3/put-object "metronbucket" key value))
-
 (defn exit
   ([code] (exit code nil))
   ([code output]
@@ -50,14 +47,14 @@
 
 (defn report-results [[err ok :as res]]
   (io/spit "result.edn" (pp res))
-  (take! (put-object "result.edn" (pp res))
+  (take! (bkt/put-object "result.edn" (pp res))
     (fn [_]
       (if err
         (exit 1 (.-message err))
         (exit 0)))))
 
 (defn handle-ping [event]
-  (take! (put-object "pong.edn" (pp event))
+  (take! (bkt/put-object "pong.edn" (pp event))
     (fn [[err ok :as res]]
       (if err
         (exit 1 (hash-map :msg (str "handle-ping put-object error: " (.-message err)) :stack (.-stack err)))
@@ -81,7 +78,7 @@
     (exit 1 [{:msg "please run with AWS_REGION set"}])
     (take! (do
              (io/spit "event.json" raw-event)
-             (put-object "event.json" raw-event))
+             (bkt/put-object "event.json" raw-event))
            (fn [_]
              (let [{:keys [x-github-event ref] :as event} (parse-event raw-event)]
                (io/spit "event.edn" (pp event))
@@ -94,6 +91,6 @@
   (fn [err origin]
     (println "uncaughtException:" {:err err :origin origin})
     (io/spit "uncaughtException.edn" {:err err :origin origin})
-    (put-object "uncaughtException.edn" (pp {:err err :origin origin}))))
+    (bkt/put-object "uncaughtException.edn" (pp {:err err :origin origin}))))
 
 (set! *main-cli-fn* -main)

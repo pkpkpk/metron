@@ -5,37 +5,16 @@
             [clojure.string :as string]
             [cljs-node-io.core :as io]
             [metron.aws.ec2 :as ec2]
-            [metron.aws.cloudformation :as cf]
+            [metron.aws.lambda :as lam]
             [metron.aws.ssm :as ssm]
             [metron.bucket :refer [ensure-bucket] :as bkt]
             [metron.keypair :as kp]
-            [metron.aws.lambda :as lam]
+            [metron.stack :as stack]
             [metron.util :refer [*debug* dbg pipe1] :as util]))
 
-(def path (js/require "path"))
+(def describe-stack (partial stack/describe-stack "metron-webhook-stack"))
 
-(def ^:dynamic *asset-path* "assets")
-
-(defn describe-stack []
-  "assumes single stack"
-  (with-promise out
-    (take! (cf/describe-stack "metron-webhook-stack")
-      (fn [[err ok :as res]]
-        (if (some? err)
-          (put! out res)
-          (put! out [nil (get-in ok [:Stacks 0])]))))))
-
-(defn get-stack-outputs []
-  (with-promise out
-    (take! (describe-stack)
-      (fn [[err {:keys [Outputs] :as ok} :as res]]
-        (if err
-          (put! out res)
-          (let [m (into {}
-                        (map (fn [{:keys [OutputKey OutputValue]}]
-                               [(keyword OutputKey) OutputValue]))
-                        Outputs)]
-            (put! out [nil m])))))))
+(def get-stack-outputs (partial stack/get-stack-outputs "metron-webhook-stack"))
 
 (defn instance-id []
   (with-promise out
@@ -104,67 +83,6 @@
           (if (some? InstanceId)
             (pipe1 (ec2/stop-instance InstanceId) out)
             (put! out [nil])))))))
-
-(defn stack-params [key-pair-name secret]
-  (let [keypair #js{"ParameterKey" "KeyName"
-                    "ParameterValue" key-pair-name}
-        wh-secret #js{"ParameterKey" "WebhookSecret"
-                      "ParameterValue" secret}
-        wh-src #js{"ParameterKey" "WebhookSrc"
-                   "ParameterValue" (io/slurp (.join path *asset-path* "js" "lambda.js"))}]
-    {:StackName "metron-webhook-stack"
-     :Capabilities #js["CAPABILITY_IAM" "CAPABILITY_NAMED_IAM"]
-     :TemplateBody (io/slurp (.join path *asset-path* "templates" "webhook.json"))
-     :Parameters [keypair wh-secret wh-src]}))
-
-(defn create-stack [{:keys [key-pair-name WebhookSecret] :as arg}]
-  (with-promise out
-    (take! (cf/create-stack (stack-params key-pair-name WebhookSecret))
-      (fn [[err {sid :StackId :as ok} :as res]]
-        (if err
-          (put! out res)
-          (do
-            (println "Creating metron-webhook-stack " sid)
-            (take! (cf/observe-stack-creation sid)
-              (fn [[err last-event :as res]]
-                (if err
-                  (put! out res)
-                  (if (= ["AWS::CloudFormation::Stack" "CREATE_COMPLETE"]
-                         ((juxt :ResourceType :ResourceStatus) last-event))
-                    (pipe1 (get-stack-outputs) out)
-                    (take! (cf/get-creation-failure sid)
-                      (fn [[err ok :as res]]
-                        (if err
-                          (put! out [{:msg "Failed retrieving creation failure"
-                                      :cause err}])
-                          (let [msg (get-in ok [0 :ResourceStatusReason])]
-                            (put! out [{:msg (str "Failed creating webhook stack: " msg)
-                                        :cause ok}])))))))))))))))
-
-(defn delete-stack [_]
-  (with-promise out
-    (take! (describe-stack)
-      (fn [[err {sid :StackId :as ok} :as res]]
-        (if err
-          (if (string/ends-with? (.-message err) "does not exist")
-            (put! out [nil])
-            (put! out res))
-          (take! (cf/delete-stack sid)
-            (fn [[err ok :as res]]
-              (if err
-                (put! out res)
-                (do
-                  (println "Deleting metron-webhook-stack " sid)
-                  (take! (cf/observe-stack-deletion sid)
-                    (fn [[err last-event :as res]]
-                      (if err
-                        (put! out res)
-                        (if (not= ["AWS::CloudFormation::Stack" "DELETE_COMPLETE"]
-                                  ((juxt :ResourceType :ResourceStatus) last-event))
-                          (put! out [{:msg "Failed deleting webhook stack"
-                                      ;;TODO retrieve actual cause
-                                      :last-event last-event}])
-                          (put! out res))))))))))))))
 
 (defn generate-deploy-key [iid]
   (with-promise out
@@ -347,6 +265,18 @@
                 (put! out res)
                 (put! out [nil "Webhook creation complete"])))))))))
 
+(defn stack-params [key-pair-name secret]
+  (let [keypair #js{"ParameterKey" "KeyName"
+                    "ParameterValue" key-pair-name}
+        wh-secret #js{"ParameterKey" "WebhookSecret"
+                      "ParameterValue" secret}
+        wh-src #js{"ParameterKey" "WebhookSrc"
+                   "ParameterValue" (io/slurp (util/asset-path "js" "lambda.js"))}]
+    {:StackName "metron-webhook-stack"
+     :Capabilities #js["CAPABILITY_IAM" "CAPABILITY_NAMED_IAM"]
+     :TemplateBody (io/slurp (util/asset-path "templates" "webhook_stack.json"))
+     :Parameters [keypair wh-secret wh-src]}))
+
 (defn create-webhook-stack
   [{:keys [key-pair-name] :as opts}]
   (with-promise out
@@ -360,9 +290,10 @@
             (fn [[err ok :as res]]
               (if err
                 (put! out res)
-                (let [_(println "key-pair OK")
-                      opts (assoc opts :WebhookSecret (util/random-string))]
-                  (take! (create-stack opts)
+                (let [;_(println "key-pair OK")
+                      WebhookSecret (util/random-string)
+                      opts (assoc opts :WebhookSecret WebhookSecret)]
+                  (take! (stack/create (stack-params key-pair-name WebhookSecret))
                     (fn [[err outputs :as res]]
                       (if err
                         (put! out res)
@@ -376,4 +307,4 @@
                                     (put! out res)
                                     (pipe1 (shutdown) out)))))))))))))))))))
 
-(defn delete-webhook [arg] (delete-stack arg))
+(defn delete-webhook [_](stack/delete "metron-webhook-stack"))

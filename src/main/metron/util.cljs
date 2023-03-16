@@ -32,3 +32,13 @@
 
 (defn random-string []
   (.toString (.randomBytes crypto 30) "hex"))
+
+(defn info [& args]
+  (apply println args))
+
+(def path (js/require "path"))
+
+(def ^:dynamic *asset-path* "assets")
+
+(defn asset-path [& paths]
+  (apply (.-join path) (into [*asset-path*] paths)))

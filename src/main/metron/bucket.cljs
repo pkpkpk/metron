@@ -3,7 +3,7 @@
   (:require [cljs.core.async :refer [promise-chan put! take!]]
             [clojure.string :as string]
             [metron.aws.s3 :as s3]
-            [metron.util :refer [pipe1]]))
+            [metron.util :refer [pipe1 info]]))
 
 (def ^:dynamic *bucket-name* "metronbucket")
 
@@ -18,13 +18,13 @@
             (put! out [{:msg "unrecognized s3/head-bucket error"
                         :cause err}])
             (do
-              (println "Creating metron bucket")
+              (info "Creating metron bucket")
               (take! (s3/create-bucket *bucket-name* (:region args))
                 (fn [[err ok :as res]]
                   (if err
                     (put! out res)
                     (do
-                      (println "waiting for bucket...")
+                      (info "waiting for bucket...")
                       (pipe1 (s3/wait-for-bucket-exists *bucket-name*) out))))))))))))
 
 (defn delete-pong []
