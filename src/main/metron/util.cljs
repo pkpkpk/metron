@@ -13,12 +13,6 @@
 
 (def readline (js/require "readline"))
 
-(def ^:dynamic *debug* true)
-
-(defn dbg [& args]
-  (when *debug*
-    (apply println args)))
-
 (defn get-acknowledgment []
   (with-promise out
     (let [rl (.createInterface readline #js{:input (.-stdin js/process) :output (.-stdout js/process)})]
@@ -33,12 +27,26 @@
 (defn random-string []
   (.toString (.randomBytes crypto 30) "hex"))
 
-(defn info [& args]
-  (apply println args))
-
 (def path (js/require "path"))
 
 (def ^:dynamic *asset-path* "assets")
 
 (defn asset-path [& paths]
   (apply (.-join path) (into [*asset-path*] paths)))
+
+(defn pr-stdout [& args]
+  (doseq [arg args]
+    (.write (.. js/process -stdout) (pr-str arg))))
+
+(defn pr-stderr [& args]
+  (doseq [arg args]
+    (.write (.. js/process -stderr) (pr-str arg))))
+
+(def ^:dynamic *debug* true)
+
+(defn dbg [& args]
+  (when *debug*
+    (apply println args)))
+
+(defn info [& args]
+  (apply println args))

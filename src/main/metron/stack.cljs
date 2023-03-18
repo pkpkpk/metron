@@ -118,7 +118,7 @@
 (defn delete [StackName]
   (with-promise out
     (take! (describe-stack StackName)
-      (fn [[err {sid :StackId :as ok} :as res]]
+      (fn [[err {sid :StackId} :as res]]
         (if err
           (if (string/ends-with? (.-message err) "does not exist")
             (put! out [nil])

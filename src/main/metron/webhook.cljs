@@ -230,11 +230,11 @@
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (take! (io/aslurp "dist/metron_server.js")
+          (take! (io/aslurp "dist/metron_webhook_handler.js")
             (fn [[err ok :as res]]
               (if err
                 (put! out res)
-                (pipe1 (bkt/put-object "metron_server.js" ok) out)))))))))
+                (pipe1 (bkt/put-object "metron_webhook_handler.js" ok) out)))))))))
 
 (defn run-script [cmd]
   (with-promise out
@@ -246,12 +246,11 @@
 
 (defn setup-server []
   (with-promise out
-    (take! (run-script "aws s3 cp s3://metronbucket/metron_server.js metron_server.js")
+    (take! (run-script "aws s3 cp s3://metronbucket/metron_webhook_handler.js metron_webhook_handler.js")
       (fn [[err :as res]]
         (if err
           (put! out res) ;;work around for npm bullshit during userdata
-          (pipe1 (run-script ["npm install aws-sdk";;to dodge region bs
-                              "npm install @aws-sdk/client-s3"]) out))))))
+          (pipe1 (run-script ["npm install @aws-sdk/client-s3"]) out))))))
 
 (defn shutdown []
   (with-promise out
@@ -285,13 +284,11 @@
         (if err
           (put! out [{:msg "metron.webhook/setup-bucket failed"
                       :cause err}])
-          (take! (do (println "metronbucket OK")
-                     (kp/validate-keypair key-pair-name))
+          (take! (kp/validate-keypair key-pair-name)
             (fn [[err ok :as res]]
               (if err
                 (put! out res)
-                (let [;_(println "key-pair OK")
-                      WebhookSecret (util/random-string)
+                (let [WebhookSecret (util/random-string)
                       opts (assoc opts :WebhookSecret WebhookSecret)]
                   (take! (stack/create (stack-params key-pair-name WebhookSecret))
                     (fn [[err outputs :as res]]

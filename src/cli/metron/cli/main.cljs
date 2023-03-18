@@ -25,18 +25,26 @@
               (:msg data)
 
                true
-              (pp data))]
+               data)]
     (if (zero? status)
-      (.write (.-stdout js/process) msg)
+      (when (some? msg)
+        (.write (.-stdout js/process) msg))
       (let [s (str "metron_error_" (js/Date.now))]
-        (.write (.-stderr js/process) msg)
-        (if (instance? js/Error data)
+        (.write (.-stderr js/process) (str msg \newline))
+        (cond
+          (instance? js/Error data)
           (let [f (cljs-node-io.file/createTempFile s ".tmp")]
-            (println "\nmore info in " (.getPath f))
+            (.write (.-stdout js/process) (.getPath f))
             (io/spit f (.-stack data)))
+          (map? data)
           (let [f (cljs-node-io.file/createTempFile s ".edn")]
-            (println "\nmore info in " (.getPath f))
-            (io/spit f (pp data))))))
+            (.write (.-stdout js/process) (.getPath f))
+            (io/spit f (pp data)))
+          true
+          (let [f (cljs-node-io.file/createTempFile s ".edn")]
+            (.write (.-stdout js/process) (.getPath f))
+            (io/spit f (pp {:msg data})))
+          )))
     (.exit js/process status)))
 
 (defn usage [options-summary]

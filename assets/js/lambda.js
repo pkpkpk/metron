@@ -35,7 +35,7 @@ exports.handler = async(event, _ctx) => {
       return {statusCode: 401, body: "bad signature"};
     } else {
       event.body = JSON.parse(event.body);
-      const event_type = event.headers["x-github-event"] === "ping");
+      const event_type = event.headers["x-github-event"];
       if (!((event_type === "ping") || ((event_type === "push") && (event.body.ref  === "refs/heads/metron")) )){
         return {status: 200, body: "no-op event"}
       }
@@ -45,7 +45,7 @@ exports.handler = async(event, _ctx) => {
         const startSessionCommand = new StartSessionCommand({Target: instanceId});
         const startSessionData = await ssm.send(startSessionCommand);
         const sessionId = startSessionData.SessionId;
-        var cmds = ["export AWS_REGION="+region,`node metron_server.js '${JSON.stringify(event)}'`];
+        var cmds = ["export AWS_REGION="+region,`node metron_webhook_handler.js '${JSON.stringify(event)}'`];
         if (shouldShutdownInstance){ cmds.push('shutdown -h now') };
         const sendCommandParams = {
           DocumentName: 'AWS-RunShellScript',
