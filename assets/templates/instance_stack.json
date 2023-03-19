@@ -41,20 +41,20 @@
   "Outputs" : {
     "InstanceId" : {
       "Description" : "InstanceId of the newly created EC2 instance",
-      "Value" : { "Ref" : "EC2Instance" }
+      "Value" : { "Ref" : "MetronInstance" }
     },
     "KeyName": {"Value" : {"Ref" : "KeyName"}},
     "AZ" : {
       "Description" : "Availability Zone of the newly created EC2 instance",
-      "Value" : { "Fn::GetAtt" : [ "EC2Instance", "AvailabilityZone" ] }
+      "Value" : { "Fn::GetAtt" : [ "MetronInstance", "AvailabilityZone" ] }
     },
     "PublicDNS" : {
       "Description" : "Public DNSName of the newly created EC2 instance",
-      "Value" : { "Fn::GetAtt" : [ "EC2Instance", "PublicDnsName" ] }
+      "Value" : { "Fn::GetAtt" : [ "MetronInstance", "PublicDnsName" ] }
     },
     "PublicIP" : {
       "Description" : "Public IP address of the newly created EC2 instance",
-      "Value" : { "Fn::GetAtt" : [ "EC2Instance", "PublicIp" ] }
+      "Value" : { "Fn::GetAtt" : [ "MetronInstance", "PublicIp" ] }
     }
   },
   "Resources" : {
@@ -97,7 +97,7 @@
         "Roles" : [{"Ref":"InstanceRole"}]
       }
     },
-    "EC2Instance" : {
+    "MetronInstance" : {
       "DependsOn" : ["InstanceSecurityGroup", "InstanceProfile"],
       "Type" : "AWS::EC2::Instance",
       "CreationPolicy": {
@@ -119,6 +119,8 @@
                     "#!/bin/bash -x\n",
                     "sudo yum update -y\n",
                     "sudo yum install -y aws-cfn-bootstrap\n",
+                    "sudo systemctl enable amazon-ssm-agent\n",
+                    "sudo systemctl start amazon-ssm-agent\n",
                     "sudo yum install git -y\n",
                     "sudo curl --silent --location https://rpm.nodesource.com/setup_16.x | bash\n",
                     "sudo yum -y install nodejs\n",
@@ -126,14 +128,12 @@
                     "sudo yum install docker -y\n",
                     "sudo service docker start\n",
                     "sudo usermod -a -G docker ec2-user\n",
-                    "sudo systemctl enable amazon-ssm-agent\n",
-                    "sudo systemctl start amazon-ssm-agent\n",
                     "/opt/aws/bin/cfn-signal -e $? ",
                     "         --stack ",
                     {
                         "Ref": "AWS::StackName"
                     },
-                    "         --resource EC2Instance ",
+                    "         --resource MetronInstance ",
                     "         --region ",
                     {
                         "Ref": "AWS::Region"

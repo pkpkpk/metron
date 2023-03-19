@@ -1,6 +1,6 @@
 (ns metron.cli.main
   (:require-macros [metron.macros :refer [with-promise]])
-  (:require [cljs.core.async :refer [go go-loop chan promise-chan put! take! close! >! <! to-chan!]]
+  (:require [cljs.core.async :refer [go >! <! to-chan!]]
             [cljs.nodejs :as nodejs]
             [cljs-node-io.core :as io]
             [cljs.pprint :refer [pprint]]
@@ -8,7 +8,8 @@
             [clojure.tools.cli :refer [parse-opts]]
             [metron.aws.ec2 :as ec2]
             [metron.keypair :as kp]
-            [metron.webhook :as wh]
+            [metron.webhook-stack :as wh]
+            [metron.instance-stack :as rem]
             [metron.util :as util :refer [*debug* pp]]))
 
 (nodejs/enable-util-print!)
@@ -28,7 +29,9 @@
                data)]
     (if (zero? status)
       (when (some? msg)
-        (.write (.-stdout js/process) msg))
+        (if (string? msg)
+          (.write (.-stdout js/process) msg)
+          (.write (.-stdout js/process) (pp msg))))
       (let [s (str "metron_error_" (js/Date.now))]
         (.write (.-stderr js/process) (str msg \newline))
         (cond
@@ -43,8 +46,7 @@
           true
           (let [f (cljs-node-io.file/createTempFile s ".edn")]
             (.write (.-stdout js/process) (.getPath f))
-            (io/spit f (pp {:msg data})))
-          )))
+            (io/spit f (pp {:msg data}))))))
     (.exit js/process status)))
 
 (defn usage [options-summary]
@@ -57,11 +59,14 @@
 (def cli-options
   [["-h" "--help"]
    ; ["-v" "--verbose"]
-   [nil "--status" "get description of instance state"]
-   [nil "--stack-status" "get description of stack state"]
    [nil "--create-webhook" "create webhook stack"]
    [nil "--delete-webhook" "delete webhook stack"]
    [nil "--configure-webhook" "add/edit webhook with existing stack"]
+
+   [nil "--create-instance" "create instance stack"]
+   [nil "--delete-instance" "delete instance stack"]
+
+   [nil "--status" "get description of instance state"]
    [nil "--start" "start instance"]
    [nil "--stop" "ensure instance is stopped"]
    [nil "--ssh" "return ssh dst into instance. without elastic-ip configured, changes every start/stop cycle"]
@@ -94,10 +99,6 @@
       {:action ::status
        :opts (dissoc options :status)}
 
-      (:stack-status options)
-      {:action ::stack-status
-       :opts (dissoc options :stack-status)}
-
       (:start options)
       {:action ::start
        :opts (dissoc options :start)}
@@ -110,14 +111,17 @@
       {:action ::configure-webhook
        :opts (dissoc options :configure-webhook)}
 
+      (:create-instance options)
+      {:action ::create-instance
+       :opts (dissoc options :create-instance)}
+
+      (:delete-instance options)
+      {:action ::delete-instance
+       :opts (dissoc options :delete-instance)}
+
       (:ssh options)
       {:action ::ssh
        :opts (dissoc options :ssh)}
-
-
-      ;; custom validation on arguments
-      ; (and (= 1 (count arguments)) (= "status" (first arguments)))
-      ; {:action ::status :options options}
 
       true
       {:action ::help
@@ -127,6 +131,30 @@
 (defn resolve-region []
   (goog.object.get (.-env js/process) "AWS_REGION"))
 
+(defn dispatch-action [action opts]
+  (case action
+    ::create-webhook (wh/create-webhook-stack opts)
+    ::delete-webhook (wh/delete-webhook-stack)
+    ::configure-webhook (wh/configure-webhook)
+
+    ::create-instance (rem/create-instance-stack opts)
+    ::delete-instance (rem/delete-instance-stack)
+
+    ;; TODO either stack
+    ::status (wh/instance-status)
+    ::start (wh/wait-for-instance)
+    ::stop (wh/stop-instance)
+    ; ::ssh (wh/ssh-address)
+    ::ssh (rem/ssh-address)
+
+    (to-chan! [[{:msg (str "umatched action: " (pr-str action))}]])))
+
+;;TODO
+;; bucket config
+;; config after the fact
+;; state via konserve
+;; -dbg flag cancels rollback
+;; JSON preference
 (defn -main [& args]
   (let [{:keys [action opts exit-message ok?] :as arg} (validate-args args)
         region (resolve-region)]
@@ -142,23 +170,10 @@
 
       true
       (go
-       (let [opts (assoc opts :region region)
-             ; _(println "region " region)
-             [err ok :as res] (<! (case action
-                                    ::create-webhook (wh/create-webhook-stack opts)
-                                    ::configure-webhook (wh/configure-webhook)
-                                    ::delete-webhook (wh/delete-webhook opts)
-                                    ::status (wh/instance-status)
-                                    ::stack-status (wh/describe-stack)
-                                    ::start (wh/wait-for-instance)
-                                    ::stop (wh/stop-instance)
-                                    ::ssh (wh/ssh-address)
-                                    ;;stack-outputs
-                                    ;;update-webhook-cmd
-                                    ;;update-lambda-code
-                                    (to-chan! [[{:msg (str "umatched action: " (pr-str action))}]])))]
-         (if err
-           (exit 1 err)
-           (exit 0 ok)))))))
+        (let [opts (assoc opts :region region)
+              [err ok :as res] (<! (dispatch-action action opts))]
+          (if err
+            (exit 1 err)
+            (exit 0 ok)))))))
 
 (set! *main-cli-fn* -main)

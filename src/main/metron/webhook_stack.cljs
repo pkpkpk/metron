@@ -1,4 +1,4 @@
-(ns metron.webhook
+(ns metron.webhook-stack
   (:require-macros [metron.macros :refer [with-promise]])
   (:require [cljs.core.async :refer [go go-loop chan promise-chan put! take!
                                      close! >! <! pipe]]
@@ -282,8 +282,7 @@
     (take! (setup-bucket opts)
       (fn [[err ok :as res]]
         (if err
-          (put! out [{:msg "metron.webhook/setup-bucket failed"
-                      :cause err}])
+          (put! out res)
           (take! (kp/validate-keypair key-pair-name)
             (fn [[err ok :as res]]
               (if err
@@ -304,4 +303,4 @@
                                     (put! out res)
                                     (pipe1 (shutdown) out)))))))))))))))))))
 
-(defn delete-webhook [_](stack/delete "metron-webhook-stack"))
+(defn delete-webhook-stack [](stack/delete "metron-webhook-stack"))
