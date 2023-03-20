@@ -9,7 +9,7 @@
             [metron.aws.ec2 :as ec2]
             [metron.keypair :as kp]
             [metron.webhook-stack :as wh]
-            [metron.instance-stack :as rem]
+            [metron.instance-stack :as instance]
             [metron.util :as util :refer [*debug* pp]]))
 
 (nodejs/enable-util-print!)
@@ -128,7 +128,7 @@
        :opts options
        :exit-message (usage summary) :ok? true})))
 
-(defn resolve-region []
+(defn resolve-region [] ;;TODO check store globals
   (goog.object.get (.-env js/process) "AWS_REGION"))
 
 (defn dispatch-action [action opts]
@@ -136,17 +136,12 @@
     ::create-webhook (wh/create-webhook-stack opts)
     ::delete-webhook (wh/delete-webhook-stack)
     ::configure-webhook (wh/configure-webhook)
-
-    ::create-instance (rem/create-instance-stack opts)
-    ::delete-instance (rem/delete-instance-stack)
-
-    ;; TODO either stack
-    ::status (wh/instance-status)
-    ::start (wh/wait-for-instance)
-    ::stop (wh/stop-instance)
-    ; ::ssh (wh/ssh-address)
-    ::ssh (rem/ssh-address)
-
+    ::create-instance (instance/create-instance-stack opts)
+    ::delete-instance (instance/delete-instance-stack)
+    ::status (instance/describe-instance) ;; TODO output is very noisy. DNE is not err etc
+    ::start (instance/wait-for-instance)
+    ::stop (instance/stop-instance)
+    ::ssh (instance/ssh-address)
     (to-chan! [[{:msg (str "umatched action: " (pr-str action))}]])))
 
 ;;TODO

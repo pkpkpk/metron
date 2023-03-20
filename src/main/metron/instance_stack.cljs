@@ -24,7 +24,7 @@
           (put! out res)
           (put! out [nil InstanceId]))))))
 
-(defn instance-status []
+(defn describe-instance []
   (with-promise out
     (take! (get-stack-outputs)
       (fn [[err {:keys [InstanceId] :as ok} :as res]]
@@ -34,7 +34,7 @@
 
 (defn ssh-address []
   (with-promise out
-    (take! (instance-status)
+    (take! (describe-instance)
       (fn [[err ok :as res]]
         (if err
           (put! out res)
@@ -43,6 +43,46 @@
             (let [public-dns (get ok :PublicDnsName)]
               (put! out [nil (str "ec2-user@" public-dns)]))))))))
 
+(defn instance-state []
+  (with-promise out
+    (take! (describe-instance)
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (put! out [nil (get-in ok [:State :Name])]))))))
+
+(defn wait-for-instance
+  ([]
+   (with-promise out
+     (take! (get-stack-outputs)
+       (fn [[err {:keys [InstanceId] :as ok} :as res]]
+         (if err
+           (put! out res)
+           (pipe1 (wait-for-instance InstanceId) out))))))
+  ([iid]
+   (with-promise out
+     (take! (instance-state)
+        (fn [[err ok :as res]]
+          (if err
+            (put! out res)
+            (if (= "running" ok)
+              (put! out res)
+              (take! (do (println "starting instance...") (ec2/start-instance iid))
+                (fn [_]
+                  (println "Waiting for instance ok" iid)
+                  (pipe1 (ec2/wait-for-ok iid) out))))))))))
+
+(def start-instance wait-for-instance)
+
+(defn stop-instance []
+  (with-promise out
+    (take! (get-stack-outputs)
+      (fn [[err {:keys [InstanceId] :as ok} :as res]]
+        (if (some? err)
+          (put! out res)
+          (if (some? InstanceId)
+            (pipe1 (ec2/stop-instance InstanceId) out)
+            (put! out [nil])))))))
 
 (defn stack-params [key-pair-name]
   {:StackName "metron-instance-stack"
@@ -80,3 +120,25 @@
                     (put! out res)))))))))))
 
 (defn delete-instance-stack [] (stack/delete "metron-instance-stack"))
+
+(defn ensure-ok
+  "if instance-stack does not exist, create it.
+   if instance exists, wake it & return when ready.
+   Yields instance-stack outputs"
+  [opts]
+  (with-promise out
+    (take! (wait-for-instance)
+      (fn [[err ok :as res]]
+        (if (nil? err)
+          (pipe1 (get-stack-outputs) out)
+          (if (= "Stack with id metron-instance-stack does not exist" (.-message err))
+            (pipe1 (create-instance-stack opts) out)
+            (put! out res)))))))
+
+(defn run-script [cmd]
+  (with-promise out
+    (take! (instance-id)
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (pipe1 (ssm/run-script ok cmd) out))))))
