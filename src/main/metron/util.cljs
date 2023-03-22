@@ -27,13 +27,6 @@
 (defn random-string []
   (.toString (.randomBytes crypto 30) "hex"))
 
-(def path (js/require "path"))
-
-(def ^:dynamic *asset-path* "assets")
-
-(defn asset-path [& paths]
-  (apply (.-join path) (into [*asset-path*] paths)))
-
 (defn pr-stdout [& args]
   (doseq [arg args]
     (.write (.. js/process -stdout) (pr-str arg))))
@@ -50,3 +43,18 @@
 
 (defn info [& args]
   (apply println args))
+
+#!==============================================================================
+;; cli only
+
+(def path (js/require "path"))
+
+(def ^:dynamic *asset-path* "assets")
+
+(defn asset-path [& paths]
+  (apply (.-join path) (into [*asset-path*] paths)))
+
+(def ^:dynamic *dist-path* "dist")
+
+(defn dist-path [& paths]
+  (apply (.-join path) (into [*dist-path*] paths)))

@@ -3,12 +3,7 @@
   (:require [cljs.core.async :refer [go go-loop promise-chan put! take!
                                      close! >! <! pipe timeout]]
             [clojure.string :as string]
-            [cljs-node-io.core :as io]
-            [metron.aws.ec2 :as ec2]
             [metron.aws.cloudformation :as cf]
-            [metron.aws.ssm :as ssm]
-            [metron.bucket :refer [ensure-bucket] :as bkt]
-            [metron.keypair :as kp]
             [metron.util :refer [*debug* dbg pipe1 info] :as util]))
 
 (def ^:dynamic *poll-interval* 9000)
@@ -24,7 +19,6 @@
         (if err
           (put! out res)
           (let [stack (sort-by :Timestamp (filter (or filter-fn any?) (get ok :StackEvents)))]
-            ;; TODO check for NextToken
             ;; https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/clients/client-cloudformation/interfaces/describestackeventscommandoutput.html#nexttoken
             (doseq [{resource :ResourceType,
                      state :ResourceStatus, :as event} stack]
@@ -98,7 +92,7 @@
         (if err
           (put! out res)
           (do
-            (println "Creating " StackName " " sid)
+            (info "Creating " StackName " " sid)
             (take! (observe-stack-creation sid)
               (fn [[err last-event :as res]]
                 (if err
@@ -128,7 +122,7 @@
               (if err
                 (put! out res)
                 (do
-                  (println "Deleting " StackName " " sid)
+                  (info "Deleting " StackName " " sid)
                   (take! (observe-stack-deletion sid)
                     (fn [[err last-event :as res]]
                       (if err
@@ -136,6 +130,5 @@
                         (if (not= ["AWS::CloudFormation::Stack" "DELETE_COMPLETE"]
                                   ((juxt :ResourceType :ResourceStatus) last-event))
                           (put! out [{:msg (str "Failed deleting " StackName)
-                                      ;;TODO retrieve actual cause
                                       :last-event last-event}])
                           (put! out res))))))))))))))

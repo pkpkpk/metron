@@ -7,10 +7,10 @@
             [metron.aws.ec2 :as ec2]
             [metron.aws.lambda :as lam]
             [metron.aws.ssm :as ssm]
-            [metron.bucket :refer [ensure-bucket] :as bkt]
+            [metron.bucket :as bkt]
             [metron.keypair :as kp]
             [metron.stack :as stack]
-            [metron.util :refer [*debug* dbg pipe1] :as util]))
+            [metron.util :refer [*debug* dbg info pipe1] :as util]))
 
 (def describe-stack (partial stack/describe-stack "metron-instance-stack"))
 
@@ -66,8 +66,8 @@
           (if err
             (put! out res)
             (if (= "running" ok)
-              (put! out res)
-              (take! (do (println "starting instance...") (ec2/start-instance iid))
+              (put! out [nil])
+              (take! (do (info "starting instance...") (ec2/start-instance iid))
                 (fn [_]
                   (println "Waiting for instance ok" iid)
                   (pipe1 (ec2/wait-for-ok iid) out))))))))))
@@ -84,6 +84,17 @@
             (pipe1 (ec2/stop-instance InstanceId) out)
             (put! out [nil])))))))
 
+(defn run-script [cmd]
+  (with-promise out
+    (take! (instance-id)
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (pipe1 (ssm/run-script ok cmd) out))))))
+
+(defn get-cloud-init-log []
+  (run-script "cat /var/log/cloud-init-output.log"))
+
 (defn stack-params [key-pair-name]
   {:StackName "metron-instance-stack"
    :DisableRollback true
@@ -92,22 +103,22 @@
    :Parameters [#js{"ParameterKey" "KeyName"
                     "ParameterValue" key-pair-name}]})
 
-(defn setup-bucket [opts]
-  (with-promise out
-    (take! (ensure-bucket opts)
-      (fn [[err ok :as res]]
-        (if err
-          (put! out res)
-          (take! (io/aslurp "dist/metron_remote_handler.js")
-            (fn [[err ok :as res]]
-              (if err
-                (put! out res)
-                (pipe1 (bkt/put-object "metron_remote_handler.js" ok) out)))))))))
+; (defn setup-bucket [opts]
+;   (with-promise out
+;     (take! (ensure-bucket opts)
+;       (fn [[err ok :as res]]
+;         (if err
+;           (put! out res)
+;           (take! (io/aslurp "dist/metron_remote_handler.js")
+;             (fn [[err ok :as res]]
+;               (if err
+;                 (put! out res)
+;                 (pipe1 (bkt/put-object "metron_remote_handler.js" ok) out)))))))))
 
 (defn create-instance-stack
   [{:keys [key-pair-name] :as opts}]
   (with-promise out
-    (take! (setup-bucket opts)
+    (take! (bkt/ensure-bucket opts)
       (fn [[err ok :as res]]
         (if err
           (put! out res)
@@ -135,10 +146,3 @@
             (pipe1 (create-instance-stack opts) out)
             (put! out res)))))))
 
-(defn run-script [cmd]
-  (with-promise out
-    (take! (instance-id)
-      (fn [[err ok :as res]]
-        (if err
-          (put! out res)
-          (pipe1 (ssm/run-script ok cmd) out))))))

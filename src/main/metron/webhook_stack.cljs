@@ -7,11 +7,11 @@
             [metron.aws.ec2 :as ec2]
             [metron.aws.lambda :as lam]
             [metron.aws.ssm :as ssm]
-            [metron.bucket :refer [ensure-bucket] :as bkt]
-            [metron.keypair :as kp]
+            [metron.bucket :as bkt]
             [metron.instance-stack :as instance]
+            [metron.keypair :as kp]
             [metron.stack :as stack]
-            [metron.util :refer [*debug* dbg pipe1] :as util]))
+            [metron.util :refer [*debug* dbg info pipe1] :as util]))
 
 (def describe-stack (partial stack/describe-stack "metron-webhook-stack"))
 
@@ -20,7 +20,6 @@
 (defn generate-deploy-key [iid]
   (with-promise out
     (let [script (io/slurp "assets/scripts/keygen.sh")]
-      (println "Generating deploy key on instance...")
       (take! (ssm/run-script iid script)
         (fn [[err ok :as res]]
           (if err
@@ -90,7 +89,6 @@
       (webhook-secret-prompt opts)
       (<! (util/get-acknowledgment))
       (println "waiting for ping result ...")
-      ;; TODO look for push events to skip work
       (let [[err ok :as res] (<! (bkt/wait-for-pong))]
         (if (nil? err)
           (do
@@ -157,13 +155,37 @@
                       (put! out res)
                       (pipe1 (confirm-push-event pong-event opts) out)))))))))))))
 
-(defn setup-server []
+(defn upload-webhook-handler [_]
   (with-promise out
-    (take! (instance/run-script "aws s3 cp s3://metronbucket/metron_webhook_handler.js metron_webhook_handler.js")
-      (fn [[err :as res]]
+    (take! (io/aslurp (util/dist-path "metron_webhook_handler.js"))
+      (fn [[err ok :as res]]
         (if err
-          (put! out res) ;;work around for npm bullshit during userdata
-          (pipe1 (instance/run-script ["npm install @aws-sdk/client-s3"]) out))))))
+          (put! out res)
+          (pipe1 (bkt/put-object "metron_webhook_handler.js" ok) out))))))
+
+(defn upload-metron-config [{:keys [bucket-name region]}]
+  (let [config {:region region :bucket-name bucket-name}]
+    (bkt/put-object "whconfig.edn" (pr-str config))))
+
+(defn cp-to-bucket [{:keys [bucket-name] :as opts}]
+  (with-promise out
+    (take! (upload-webhook-handler opts)
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (pipe1 (upload-metron-config opts) out))))))
+
+(defn copy-metron-files-to-instance [{:keys [bucket-name] :as opts}]
+  (with-promise out
+    (take! (cp-to-bucket opts)
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (let [s3-src (fn [file] (str "s3://" bucket-name "/" file))]
+            (instance/run-script [(str "aws s3 cp " (s3-src "metron_webhook_handler.js") " metron_webhook_handler.js")
+                                  (str "aws s3 cp " (s3-src "whconfig.edn") " whconfig.edn")
+                                  ;;work around for npm bullshit during userdata
+                                  "npm install @aws-sdk/client-s3"])))))))
 
 (defn shutdown []
   (with-promise out
@@ -177,39 +199,43 @@
                 (put! out res)
                 (put! out [nil "Webhook creation complete. Instance is shutting down."])))))))))
 
-(defn stack-params [InstanceId secret]
+(defn stack-params [InstanceId WebhookSecret]
   (let [wh-secret #js{"ParameterKey" "WebhookSecret"
-                      "ParameterValue" secret}
+                      "ParameterValue" WebhookSecret}
         instance-id #js{"ParameterKey" "InstanceId"
-                      "ParameterValue" InstanceId}
+                        "ParameterValue" InstanceId}
         wh-src #js{"ParameterKey" "WebhookSrc"
                    "ParameterValue" (io/slurp (util/asset-path "js" "lambda.js"))}]
     {:StackName "metron-webhook-stack"
      :Capabilities #js["CAPABILITY_IAM" "CAPABILITY_NAMED_IAM"]
+     :DisableRollback false
      :TemplateBody (io/slurp (util/asset-path "templates" "webhook_stack.json"))
      :Parameters [instance-id wh-secret wh-src]}))
 
 (defn create-webhook-stack
   [{:keys [key-pair-name] :as opts}]
   (with-promise out
-    (take! (instance/ensure-ok opts)
-      (fn [[err {InstanceId :InstanceId} :as res]]
+    (take! (bkt/ensure-bucket opts)
+      (fn [[err bucket-name :as res]]
         (if err
           (put! out res)
-          (let [WebhookSecret (util/random-string)
-                opts (assoc opts :WebhookSecret WebhookSecret)]
-            (take! (stack/create (stack-params InstanceId WebhookSecret))
-              (fn [[err outputs :as res]]
+            (take! (instance/ensure-ok opts)
+              (fn [[err {InstanceId :InstanceId} :as res]]
                 (if err
                   (put! out res)
-                  (take! (setup-server)
-                    (fn [[err :as res]]
-                      (if err
-                        (put! out res)
-                        (take! (configure-webhook outputs)
-                          (fn [[err ok :as res]]
-                            (if err
-                              (put! out res)
-                              (pipe1 (shutdown) out))))))))))))))))
+                  (let [WebhookSecret (util/random-string)]
+                    (take! (stack/create (stack-params InstanceId WebhookSecret))
+                      (fn [[err outputs :as res]]
+                        (if err
+                          (put! out res)
+                          (take! (copy-metron-files-to-instance (assoc opts :bucket-name bucket-name))
+                            (fn [[err :as res]]
+                              (if err
+                                (put! out res)
+                                (take! (configure-webhook outputs)
+                                  (fn [[err ok :as res]]
+                                    (if err
+                                      (put! out res)
+                                      (pipe1 (shutdown) out)))))))))))))))))))
 
 (defn delete-webhook-stack [](stack/delete "metron-webhook-stack"))

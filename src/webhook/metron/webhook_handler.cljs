@@ -5,6 +5,7 @@
             [cljs-node-io.core :as io]
             [cljs-node-io.proc :as proc]
             [cljs.pprint :refer [pprint]]
+            [cljs.reader :refer [read-string]]
             [clojure.string :as string]
             [goog.object]
             [metron.bucket :as bkt]
@@ -13,7 +14,6 @@
             [metron.util :as util :refer [*debug* pp]]))
 
 (nodejs/enable-util-print!)
-
 
 (defn parse-event [event]
   (let [json (js/JSON.parse event)
@@ -73,12 +73,21 @@
         (report-results [{:msg "Uncaught error"
                           :cause err}])))))
 
+(defn get-config []
+  (read-string (io/slurp "config.edn")))
+
+(defn setup-bucket []
+  (let [{:keys [bucket-name]} (get-config)]
+    (assert (string? bucket-name))
+    (set! bkt/*bucket-name* bucket-name)))
+
 (defn -main
   [raw-event]
   (if (nil? (goog.object.get (.-env js/process) "AWS_REGION"))
     (exit 1 [{:msg "please run with AWS_REGION set"}])
     (take! (do
              (io/spit "event.json" raw-event)
+             (setup-bucket)
              (bkt/put-object "event.json" raw-event))
            (fn [_]
              (let [{:keys [x-github-event ref] :as event} (parse-event raw-event)]

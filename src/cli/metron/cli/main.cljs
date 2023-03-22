@@ -37,15 +37,15 @@
         (cond
           (instance? js/Error data)
           (let [f (cljs-node-io.file/createTempFile s ".tmp")]
-            (.write (.-stdout js/process) (.getPath f))
-            (io/spit f (.-stack data)))
+            (.write (.-stdout js/process) (str (.getPath f) \newline))
+            (io/spit f (str (.-stack data) \newline)))
           (map? data)
           (let [f (cljs-node-io.file/createTempFile s ".edn")]
-            (.write (.-stdout js/process) (.getPath f))
+            (.write (.-stdout js/process) (str (.getPath f) \newline))
             (io/spit f (pp data)))
           true
           (let [f (cljs-node-io.file/createTempFile s ".edn")]
-            (.write (.-stdout js/process) (.getPath f))
+            (.write (.-stdout js/process) (str (.getPath f) \newline))
             (io/spit f (pp {:msg data}))))))
     (.exit js/process status)))
 
@@ -65,14 +65,18 @@
 
    [nil "--create-instance" "create instance stack"]
    [nil "--delete-instance" "delete instance stack"]
-
    [nil "--status" "get description of instance state"]
    [nil "--start" "start instance"]
    [nil "--stop" "ensure instance is stopped"]
    [nil "--ssh" "return ssh dst into instance. without elastic-ip configured, changes every start/stop cycle"]
-   ["-k" "--key-pair-name KEYPAIRNAME" "name of a SSH key registered with ec2"]])
 
-(defn error-msg [errors] ;;TODO tailor error messages to optis
+   ["-k" "--key-pair-name KEYPAIRNAME" "name of a SSH key registered with ec2"]
+   ; ["-b" "--bucket BUCKETNAME" "name of bucket to use. If one is not provided one is created"]
+   ["-p" "--profile AWS_PROFILE" "Defers to environment. Once set will be stored and reused"]
+   ["-r" "--region AWS_REGION" "Defers to environment. Once set will be stored and reused"]
+   ])
+
+(defn error-msg [errors]
   (str "The following errors occurred while parsing your command:\n\n"
        (string/join \newline errors)))
 
@@ -128,7 +132,7 @@
        :opts options
        :exit-message (usage summary) :ok? true})))
 
-(defn resolve-region [] ;;TODO check store globals
+(defn resolve-region []
   (goog.object.get (.-env js/process) "AWS_REGION"))
 
 (defn dispatch-action [action opts]
@@ -138,18 +142,12 @@
     ::configure-webhook (wh/configure-webhook)
     ::create-instance (instance/create-instance-stack opts)
     ::delete-instance (instance/delete-instance-stack)
-    ::status (instance/describe-instance) ;; TODO output is very noisy. DNE is not err etc
+    ::status (instance/describe-instance)
     ::start (instance/wait-for-instance)
     ::stop (instance/stop-instance)
     ::ssh (instance/ssh-address)
     (to-chan! [[{:msg (str "umatched action: " (pr-str action))}]])))
 
-;;TODO
-;; bucket config
-;; config after the fact
-;; state via konserve
-;; -dbg flag cancels rollback
-;; JSON preference
 (defn -main [& args]
   (let [{:keys [action opts exit-message ok?] :as arg} (validate-args args)
         region (resolve-region)]
