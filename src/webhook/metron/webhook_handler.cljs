@@ -86,8 +86,8 @@
   (if (nil? (goog.object.get (.-env js/process) "AWS_REGION"))
     (exit 1 [{:msg "please run with AWS_REGION set"}])
     (take! (do
-             (io/spit "event.json" raw-event)
              (setup-bucket)
+             (io/spit "event.json" raw-event)
              (bkt/put-object "event.json" raw-event))
            (fn [_]
              (let [{:keys [x-github-event ref] :as event} (parse-event raw-event)]

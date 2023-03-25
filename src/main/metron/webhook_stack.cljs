@@ -155,38 +155,6 @@
                       (put! out res)
                       (pipe1 (confirm-push-event pong-event opts) out)))))))))))))
 
-(defn upload-webhook-handler [_]
-  (with-promise out
-    (take! (io/aslurp (util/dist-path "metron_webhook_handler.js"))
-      (fn [[err ok :as res]]
-        (if err
-          (put! out res)
-          (pipe1 (bkt/put-object "metron_webhook_handler.js" ok) out))))))
-
-(defn upload-metron-config [{:keys [bucket-name region]}]
-  (let [config {:region region :bucket-name bucket-name}]
-    (bkt/put-object "whconfig.edn" (pr-str config))))
-
-(defn cp-to-bucket [{:keys [bucket-name] :as opts}]
-  (with-promise out
-    (take! (upload-webhook-handler opts)
-      (fn [[err ok :as res]]
-        (if err
-          (put! out res)
-          (pipe1 (upload-metron-config opts) out))))))
-
-(defn copy-metron-files-to-instance [{:keys [bucket-name] :as opts}]
-  (with-promise out
-    (take! (cp-to-bucket opts)
-      (fn [[err ok :as res]]
-        (if err
-          (put! out res)
-          (let [s3-src (fn [file] (str "s3://" bucket-name "/" file))]
-            (instance/run-script [(str "aws s3 cp " (s3-src "metron_webhook_handler.js") " metron_webhook_handler.js")
-                                  (str "aws s3 cp " (s3-src "whconfig.edn") " whconfig.edn")
-                                  ;;work around for npm bullshit during userdata
-                                  "npm install @aws-sdk/client-s3"])))))))
-
 (defn shutdown []
   (with-promise out
     (take! (lam/set-env-entry "metron_webhook_lambda" "SHOULD_SHUTDOWN_INSTANCE" "true")
@@ -228,14 +196,10 @@
                       (fn [[err outputs :as res]]
                         (if err
                           (put! out res)
-                          (take! (copy-metron-files-to-instance (assoc opts :bucket-name bucket-name))
-                            (fn [[err :as res]]
+                          (take! (configure-webhook outputs)
+                            (fn [[err ok :as res]]
                               (if err
                                 (put! out res)
-                                (take! (configure-webhook outputs)
-                                  (fn [[err ok :as res]]
-                                    (if err
-                                      (put! out res)
-                                      (pipe1 (shutdown) out)))))))))))))))))))
+                                (pipe1 (shutdown) out))))))))))))))))
 
 (defn delete-webhook-stack [](stack/delete "metron-webhook-stack"))

@@ -2,6 +2,7 @@
   (:require-macros [metron.macros :refer [with-promise]])
   (:require [cljs.core.async :refer [promise-chan put! take!]]
             [clojure.string :as string]
+            [cljs-node-io.core :as io]
             [metron.aws.iam :as iam]
             [metron.aws.s3 :as s3]
             [metron.util :refer [pipe1 info]]))
@@ -50,6 +51,25 @@
                                   (put! out res)
                                   (put! out [nil bucket-name]))))))))))))))))))
 
+(defn put-object [key value]
+  (with-promise out
+    (take! (get-bucket-name)
+      (fn [[err bucket-name :as res]]
+        (if err
+          (put! out res)
+          (pipe1 (s3/put-object bucket-name key value) out))))))
+
+(defn upload-file
+  ([src-path]
+   (upload-file src-path (.getName (io/file src-path))))
+  ([src-path dst-path]
+   (with-promise out
+     (take! (io/aslurp src-path)
+       (fn [[err ok :as res]]
+         (if err
+           (put! out res)
+           (pipe1 (put-object dst-path ok) out)))))))
+
 (defn delete-pong []
   (with-promise out
     (take! (get-bucket-name)
@@ -89,11 +109,3 @@
         (if err
           (put! out res)
           (pipe1 (s3/wait-for-object-exists bucket-name "result.edn") out))))))
-
-(defn put-object [key value]
-  (with-promise out
-    (take! (get-bucket-name)
-      (fn [[err bucket-name :as res]]
-        (if err
-          (put! out res)
-          (pipe1 (s3/put-object bucket-name key value) out))))))

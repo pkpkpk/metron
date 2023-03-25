@@ -69,7 +69,7 @@
               (put! out [nil])
               (take! (do (info "starting instance...") (ec2/start-instance iid))
                 (fn [_]
-                  (println "Waiting for instance ok" iid)
+                  (info "Waiting for instance ok" iid)
                   (pipe1 (ec2/wait-for-ok iid) out))))))))))
 
 (def start-instance wait-for-instance)
@@ -97,29 +97,50 @@
 
 (defn stack-params [key-pair-name]
   {:StackName "metron-instance-stack"
-   :DisableRollback true
+   :DisableRollback true ;;TODO make configurable
    :Capabilities #js["CAPABILITY_IAM" "CAPABILITY_NAMED_IAM"]
    :TemplateBody (io/slurp (util/asset-path "templates" "instance_stack.json"))
    :Parameters [#js{"ParameterKey" "KeyName"
                     "ParameterValue" key-pair-name}]})
 
-; (defn setup-bucket [opts]
-;   (with-promise out
-;     (take! (ensure-bucket opts)
-;       (fn [[err ok :as res]]
-;         (if err
-;           (put! out res)
-;           (take! (io/aslurp "dist/metron_remote_handler.js")
-;             (fn [[err ok :as res]]
-;               (if err
-;                 (put! out res)
-;                 (pipe1 (bkt/put-object "metron_remote_handler.js" ok) out)))))))))
+(defn upload-server-files-to-bucket [{:keys [bucket-name region] :as opts}]
+  (with-promise out
+    (take! (bkt/upload-file "dist/metron_webhook_handler.js")
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (take! (bkt/upload-file "dist/metron_remote_handler.js")
+            (fn [[err ok :as res]]
+              (if err
+                (put! out res)
+                (let [config {:region region :bucket-name bucket-name}]
+                  (pipe1 (bkt/put-object "config.edn" (pr-str config)) out))))))))))
+
+(defn install-metron-handlers [{:keys [bucket-name region InstanceId] :as opts}]
+  (assert (some? bucket-name))
+  (assert (some? region))
+  (with-promise out
+    (info "uploading files to instance...")
+    (take! (upload-server-files-to-bucket opts)
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (let [s3-src (fn [file] (str "s3://" bucket-name "/" file))
+                cp-cmd (fn [file] (string/join " " ["aws s3 cp" (s3-src file) file]))
+                cmds [(cp-cmd "metron_webhook_handler.js")
+                      (cp-cmd "metron_remote_handler.js")
+                      (cp-cmd "config.edn")
+                      "mkdir .aws"
+                      (str  "echo '[metron]\nregion = " region "' >> .aws/config")
+                      ;;work around for npm bullshit during userdata
+                      "npm install @aws-sdk/client-s3"]]
+            (pipe1 (ssm/run-script InstanceId cmds) out)))))))
 
 (defn create-instance-stack
   [{:keys [key-pair-name] :as opts}]
   (with-promise out
     (take! (bkt/ensure-bucket opts)
-      (fn [[err ok :as res]]
+      (fn [[err bucket-name :as res]]
         (if err
           (put! out res)
           (take! (kp/validate-keypair key-pair-name)
@@ -127,8 +148,16 @@
               (if err
                 (put! out res)
                 (take! (stack/create (stack-params key-pair-name))
-                  (fn [[err outputs :as res]]
-                    (put! out res)))))))))))
+                  (fn [[err {InstanceId :InstanceId :as outputs} :as res]]
+                    (if err
+                      (put! out res)
+                      (take! (install-metron-handlers (assoc opts
+                                                             :bucket-name bucket-name
+                                                             :InstanceId InstanceId))
+                        (fn [[err ok :as res]]
+                          (if err
+                            (put! out res)
+                            (put! out [nil outputs])))))))))))))))
 
 (defn delete-instance-stack [] (stack/delete "metron-instance-stack"))
 
