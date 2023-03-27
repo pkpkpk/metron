@@ -78,7 +78,7 @@
 
 (defn handle-event [{:keys [x-github-event ref] :as event}]
   (let []
-    (io/spit "event.edn" event)
+    (log/info "Handling" x-github-event " event")
     (case x-github-event
       "ping" (handle-ping event)
       "push" (handle-push event)
@@ -86,6 +86,7 @@
 
 (defn -main
   [raw-event]
+  (log/info "starting metron.webhook-handler")
   (if (and (nil? (goog.object.get (.-env js/process) "AWS_REGION"))
            (nil? (goog.object.get (.-env js/process) "AWS_PROFILE")))
     (exit 1 [{:msg "please run with AWS_REGION or AWS_PROFILE=metron"}])
@@ -100,7 +101,7 @@
 
 (.on js/process "uncaughtException"
   (fn [err origin]
-    (log/err (pr-str {:err err :origin origin}))
+    (log/fatal {:err err :origin origin})
     (set! (.-exitCode js/process) 1)))
 
 (set! *main-cli-fn* -main)

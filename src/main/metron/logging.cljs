@@ -1,4 +1,5 @@
-(ns metron.logging)
+(ns metron.logging
+  (:require [clojure.string :as string]))
 
 (defn pad-number [num]
   (str (if (< num 10) "0" "") num))
@@ -19,6 +20,11 @@
                            ":" (pad-number seconds))]
     timestamp-str))
 
+(defn format-arg [arg] (if (string? arg) arg (pr-str arg)))
+
+(defn format-args [args]
+  (string/join " " (map format-arg args)))
+
 (defn stderr [arg]
   (.write (.. js/process -stderr) arg))
 
@@ -30,10 +36,17 @@
 ;; TODO configure human/json/edn
 
 (defn err [& args]
-  (apply *log* (str "["(timestamp)"] ERROR: ") args))
+  (assert (fn? *log*))
+  (*log* (str "["(timestamp)"] ERROR: " (format-args args) \newline)))
 
 (defn info [& args]
-  (apply *log* (str "["(timestamp)"] INFO: ") args))
+  (assert (fn? *log*))
+  (*log* (str "["(timestamp)"] INFO: " (format-args args) \newline)))
 
 (defn warn [& args]
-  (apply *log* (str "["(timestamp)"] WARN: ") args))
+  (assert (fn? *log*))
+  (*log* (str "["(timestamp)"] WARN: " (format-args args) \newline)))
+
+(defn fatal [& args]
+  (assert (fn? *log*))
+  (*log* (str "["(timestamp)"] FATAL: " (format-args args) \newline)))
