@@ -11,7 +11,8 @@
             [metron.instance-stack :as instance]
             [metron.keypair :as kp]
             [metron.stack :as stack]
-            [metron.util :refer [*debug* dbg info pipe1] :as util]))
+            [metron.logging :refer [info] :as log]
+            [metron.util :refer [pipe1] :as util]))
 
 (def describe-stack (partial stack/describe-stack "metron-webhook-stack"))
 
@@ -182,10 +183,12 @@
   ([iid]
     (with-promise out
       (let [json "{}"]
+        (info "Testing ping handling..")
         (take! (ssm/run-script iid "./bin/metron-webhook")
-          (fn [[{:keys [StandardErrorContent] :as err} ok :as res]]
-            (put! out res)
-            ))))))
+          (fn [[err ok :as res]]
+            (put! out res)))))))
+
+;; test endpoint
 
 (defn stack-params [InstanceId WebhookSecret]
   (let [wh-secret #js{"ParameterKey" "WebhookSecret"

@@ -10,7 +10,7 @@
             [metron.keypair :as kp]
             [metron.webhook-stack :as wh]
             [metron.instance-stack :as instance]
-            [metron.util :as util :refer [*debug* pp]]))
+            [metron.util :as util :refer [pp]]))
 
 (nodejs/enable-util-print!)
 

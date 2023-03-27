@@ -10,7 +10,8 @@
             [metron.bucket :as bkt]
             [metron.keypair :as kp]
             [metron.stack :as stack]
-            [metron.util :refer [*debug* dbg info pipe1] :as util]))
+            [metron.logging :as log]
+            [metron.util :refer [pipe1] :as util]))
 
 (def describe-stack (partial stack/describe-stack "metron-instance-stack"))
 
@@ -67,9 +68,9 @@
             (put! out res)
             (if (= "running" ok)
               (put! out [nil])
-              (take! (do (info "starting instance...") (ec2/start-instance iid))
+              (take! (do (log/info "starting instance...") (ec2/start-instance iid))
                 (fn [_]
-                  (info "Waiting for instance ok" iid)
+                  (log/info "Waiting for instance ok" iid)
                   (pipe1 (ec2/wait-for-ok iid) out))))))))))
 
 (def start-instance wait-for-instance)
@@ -120,19 +121,19 @@
   (assert (some? Bucket))
   (assert (some? region))
   (with-promise out
-    (info "Uploading files to " Bucket)
+    (log/info "Uploading files to " Bucket)
     (take! (upload-files-to-bucket opts)
       (fn [[err ok :as res]]
         (if err
           (put! out res)
           (take! (let [cmd (str "aws s3 cp s3://" Bucket "/install.sh install.sh")]
-                   (info "Downloading files from " Bucket " to " InstanceId)
+                   (log/info "Downloading files from " Bucket " to " InstanceId)
                    (ssm/run-script InstanceId cmd))
             (fn [[err ok :as res]]
               (if err
                 (put! out res)
                 (let [cmd (str "chmod +x ./install.sh && ./install.sh " Bucket " " region)]
-                  (info "Installing handlers on instance " InstanceId)
+                  (log/info "Installing handlers on instance " InstanceId)
                   (pipe1 (ssm/run-script InstanceId cmd) out))))))))))
 
 ;; cleanup bucket & install script?

@@ -5,7 +5,8 @@
             [cljs-node-io.core :as io]
             [metron.aws.iam :as iam]
             [metron.aws.s3 :as s3]
-            [metron.util :refer [pipe1 info]]))
+            [metron.logging :as log]
+            [metron.util :refer [pipe1]]))
 
 (def ^:dynamic *bucket-name*)
 
@@ -38,13 +39,13 @@
                 (if-not (string/includes? (str err) "NotFound")
                   (put! out [err])
                   (do
-                    (info "Creating bucket " bucket-name)
+                    (log/info "Creating bucket " bucket-name)
                     (take! (s3/create-bucket bucket-name region)
                       (fn [[err ok :as res]]
                         (if err
                           (put! out res)
                           (do
-                            (info "waiting for bucket...")
+                            (log/info "waiting for bucket...")
                             (take! (s3/wait-for-bucket-exists bucket-name)
                               (fn [[err ok :as res]]
                                 (if err

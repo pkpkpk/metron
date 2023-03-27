@@ -4,7 +4,8 @@
                                      close! >! <! pipe timeout]]
             [clojure.string :as string]
             [metron.aws.cloudformation :as cf]
-            [metron.util :refer [*debug* dbg pipe1 info] :as util]))
+            [metron.logging :as log]
+            [metron.util :refer [pipe1] :as util]))
 
 (def ^:dynamic *poll-interval* 9000)
 
@@ -27,7 +28,7 @@
               (when-not (@_seen (ident event))
                 (do
                   (swap! _seen conj (ident event))
-                  (info (string/join " " (ident event))))))
+                  (log/info (string/join " " (ident event))))))
             (if @_exit-event
               (put! out [nil @_exit-event])
               (do
@@ -92,7 +93,7 @@
         (if err
           (put! out res)
           (do
-            (info "Creating " StackName " " sid)
+            (log/info "Creating " StackName " " sid)
             (take! (observe-stack-creation sid)
               (fn [[err last-event :as res]]
                 (if err
@@ -122,7 +123,7 @@
               (if err
                 (put! out res)
                 (do
-                  (info "Deleting " StackName " " sid)
+                  (log/info "Deleting " StackName " " sid)
                   (take! (observe-stack-deletion sid)
                     (fn [[err last-event :as res]]
                       (if err

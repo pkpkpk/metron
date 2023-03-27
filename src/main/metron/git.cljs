@@ -4,7 +4,7 @@
             [clojure.string :as string]
             [cljs-node-io.core :as io]
             [cljs-node-io.proc :as proc]
-            [metron.util :refer [*debug* dbg pipe1] :as util]))
+            [metron.util :refer [ pipe1] :as util]))
 
 (def path (js/require "path"))
 

@@ -4,7 +4,7 @@
             [clojure.string :as string]
             [cljs-node-io.core :as io]
             [metron.aws.ec2 :as ec2]
-            [metron.util :refer [*debug* dbg pipe1 pp]]))
+            [metron.util :refer [ pipe1 pp]]))
 
 (defn key-is-registered? [key-name]
   (with-promise out

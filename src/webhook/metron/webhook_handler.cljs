@@ -11,7 +11,8 @@
             [metron.aws.s3 :as s3]
             [metron.git :as g]
             [metron.docker :as d]
-            [metron.util :as util :refer [*debug* pp]]))
+            [metron.logging :as log]
+            [metron.util :as util]))
 
 (nodejs/enable-util-print!)
 
@@ -95,12 +96,11 @@
           (exit 1 [{:msg "expected json string in first arg"}])
           (do
             (set! *bucket* Bucket)
-            (io/spit "event.json" raw-event)
             (handle-event (parse-event raw-event))))))))
 
 (.on js/process "uncaughtException"
   (fn [err origin]
-    (println "uncaughtException:" {:err err :origin origin})
-    (io/spit "uncaughtException.edn" {:err err :origin origin})))
+    (log/err (pr-str {:err err :origin origin}))
+    (set! (.-exitCode js/process) 1)))
 
 (set! *main-cli-fn* -main)

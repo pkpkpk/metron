@@ -4,7 +4,8 @@
             [clojure.string :as string]
             [cljs-node-io.core :as io]
             [cljs-node-io.proc :as proc]
-            [metron.util :refer [*debug* info dbg pipe1] :as util]))
+            [metron.logging :as log]
+            [metron.util :refer [pipe1] :as util]))
 
 (def path (js/require "path"))
 
@@ -12,19 +13,19 @@
   (.join path "metron_repos" full_name))
 
 (defn build [{:keys [after] :as event}]
-  (info "building container... " after)
+  (log/info "building container... " after)
   (proc/aexec (str "sudo -u ec2-user docker build -t " after " ." )
               {:encoding "utf8"
                :cwd (local-dir-path event)}))
 
 (defn run [{:keys [after] :as event}]
-  (info "running container... " after)
+  (log/info "running container... " after)
   (proc/aexec (str "sudo -u ec2-user docker run " after)
               {:encoding "utf8"
                :cwd (local-dir-path event)}))
 
 (defn process-event [{:keys [] :as event}]
-  (info "starting docker")
+  (log/info "starting docker")
   (with-promise out
     (if-not (.exists (io/file (local-dir-path event) "Dockerfile"))
       (put! out [{:msg "At this time Metron expects a Dockerfile to run the task"}])

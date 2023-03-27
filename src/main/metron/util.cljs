@@ -27,23 +27,6 @@
 (defn random-string []
   (.toString (.randomBytes crypto 30) "hex"))
 
-(defn pr-stdout [& args]
-  (doseq [arg args]
-    (.write (.. js/process -stdout) (pr-str arg))))
-
-(defn pr-stderr [& args]
-  (doseq [arg args]
-    (.write (.. js/process -stderr) (pr-str arg))))
-
-(def ^:dynamic *debug* true)
-
-(defn dbg [& args]
-  (when *debug*
-    (apply println args)))
-
-(defn info [& args]
-  (apply println args))
-
 #!==============================================================================
 ;; cli only
 
