@@ -24,7 +24,11 @@
         (fn [[err ok :as res]]
           (if err
             (put! out res)
-            (put! out [nil (get ok :StandardOutputContent)])))))))
+            (let [stdout (get ok :StandardOutputContent)
+                  key (-> stdout
+                        (string/replace ".ssh/id_rsa already exists.\nOverwrite (y/n)? "  "")
+                        string/trim)]
+              (put! out [nil key]))))))))
 
 (defn verify-deploy-key [iid]
   (with-promise out

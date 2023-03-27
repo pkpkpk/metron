@@ -103,38 +103,41 @@
    :Parameters [#js{"ParameterKey" "KeyName"
                     "ParameterValue" key-pair-name}]})
 
-(defn upload-server-files-to-bucket [{:keys [bucket-name region] :as opts}]
+(defn upload-files-to-bucket [{:keys [bucket-name region] :as opts}]
   (with-promise out
-    (take! (bkt/upload-file "dist/metron_webhook_handler.js")
+    (take! (bkt/upload-files ["dist/metron_webhook_handler.js"
+                              "dist/metron_remote_handler.js"
+                              (util/asset-path "scripts" "metron-remote.sh")
+                              (util/asset-path "scripts" "metron-webhook.sh")
+                              (util/asset-path "scripts" "install.sh")])
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (take! (bkt/upload-file "dist/metron_remote_handler.js")
-            (fn [[err ok :as res]]
-              (if err
-                (put! out res)
-                (let [config {:region region :bucket-name bucket-name}]
-                  (pipe1 (bkt/put-object "config.edn" (pr-str config)) out))))))))))
+          (let [config (pr-str {:region region :bucket-name bucket-name})]
+            (pipe1 (bkt/put-object "bin/config.edn" config) out)))))))
 
-(defn install-metron-handlers [{:keys [bucket-name region InstanceId] :as opts}]
+
+
+
+(defn install [{:keys [bucket-name region InstanceId] :as opts}]
   (assert (some? bucket-name))
   (assert (some? region))
   (with-promise out
-    (info "uploading files to instance...")
-    (take! (upload-server-files-to-bucket opts)
+    (info "uploading files to " bucket-name)
+    (take! (upload-files-to-bucket opts)
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (let [s3-src (fn [file] (str "s3://" bucket-name "/" file))
-                cp-cmd (fn [file] (string/join " " ["aws s3 cp" (s3-src file) file]))
-                cmds [(cp-cmd "metron_webhook_handler.js")
-                      (cp-cmd "metron_remote_handler.js")
-                      (cp-cmd "config.edn")
-                      "mkdir .aws"
-                      (str  "echo '[metron]\nregion = " region "' >> .aws/config")
-                      ;;work around for npm bullshit during userdata
-                      "npm install @aws-sdk/client-s3"]]
-            (pipe1 (ssm/run-script InstanceId cmds) out)))))))
+          (take! (let [cmd (str "aws s3 cp s3://" bucket-name "/install.sh install.sh")]
+                   (info "downloading file from " bucket-name " to " InstanceId)
+                   (ssm/run-script InstanceId cmd))
+            (fn [[err ok :as res]]
+              (if err
+                (put! out res)
+                (let [cmd (str "chmod +x ./install.sh && ./install.sh " bucket-name " " region)]
+                  (pipe1 (ssm/run-script InstanceId cmd) out))))))))))
+
+;; cleanup bucket & install script?
 
 (defn create-instance-stack
   [{:keys [key-pair-name] :as opts}]
@@ -151,9 +154,8 @@
                   (fn [[err {InstanceId :InstanceId :as outputs} :as res]]
                     (if err
                       (put! out res)
-                      (take! (install-metron-handlers (assoc opts
-                                                             :bucket-name bucket-name
-                                                             :InstanceId InstanceId))
+                      (take! (install (assoc opts :bucket-name bucket-name
+                                                  :InstanceId InstanceId))
                         (fn [[err ok :as res]]
                           (if err
                             (put! out res)

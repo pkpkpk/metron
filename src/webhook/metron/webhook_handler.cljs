@@ -73,29 +73,28 @@
         (report-results [{:msg "Uncaught error"
                           :cause err}])))))
 
-(defn get-config []
-  (read-string (io/slurp "config.edn")))
-
-(defn setup-bucket []
-  (let [{:keys [bucket-name]} (get-config)]
-    (assert (string? bucket-name))
-    (set! bkt/*bucket-name* bucket-name)))
+(defn handle-event [{:keys [x-github-event ref] :as event}]
+  (let []
+    (io/spit "event.edn" (pp event))
+    (case x-github-event
+      "ping" (handle-ping event)
+      "push" (handle-push event)
+      (report-results [{:msg (str "unrecognized event '" x-github-event "'")}]))))
 
 (defn -main
   [raw-event]
-  (if (nil? (goog.object.get (.-env js/process) "AWS_REGION"))
-    (exit 1 [{:msg "please run with AWS_REGION set"}])
-    (take! (do
-             (setup-bucket)
-             (io/spit "event.json" raw-event)
-             (bkt/put-object "event.json" raw-event))
-           (fn [_]
-             (let [{:keys [x-github-event ref] :as event} (parse-event raw-event)]
-               (io/spit "event.edn" (pp event))
-               (case x-github-event
-                 "ping" (handle-ping event)
-                 "push" (handle-push event)
-                 (report-results [{:msg (str "unrecognized event '" x-github-event "'")}])))))))
+  (if (and (nil? (goog.object.get (.-env js/process) "AWS_REGION"))
+           (nil? (goog.object.get (.-env js/process) "AWS_PROFILE")))
+    (exit 1 [{:msg "please run with AWS_REGION or AWS_PROFILE=metron"}])
+    (let [{:keys [bucket-name] :as cfg} (read-string (io/slurp "config.edn"))]
+      (if (nil? bucket-name)
+        (exit 1 [{:msg "missing bucket-name in config.edn"}])
+        (if (nil? raw-event)
+          (exit 1 [{:msg "expected json string in first arg"}])
+          (do
+            (set! bkt/*bucket-name* bucket-name)
+            (io/spit "event.json" raw-event)
+            (handle-event (parse-event raw-event))))))))
 
 (.on js/process "uncaughtException"
   (fn [err origin]

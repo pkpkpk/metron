@@ -1,6 +1,6 @@
 (ns metron.bucket
   (:require-macros [metron.macros :refer [with-promise]])
-  (:require [cljs.core.async :refer [promise-chan put! take!]]
+  (:require [cljs.core.async :refer [promise-chan put! take! go-loop >! <!]]
             [clojure.string :as string]
             [cljs-node-io.core :as io]
             [metron.aws.iam :as iam]
@@ -69,6 +69,16 @@
          (if err
            (put! out res)
            (pipe1 (put-object dst-path ok) out)))))))
+
+(defn upload-files [files]
+  (with-promise out
+    (go-loop [files files]
+      (if-let [file (first files)]
+        (let [[err ok :as res] (<! (upload-file file))]
+          (if (some? err)
+            (put! out res)
+            (recur (rest files))))
+        (put! out [nil])))))
 
 (defn delete-pong []
   (with-promise out
