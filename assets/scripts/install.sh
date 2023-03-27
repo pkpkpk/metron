@@ -28,7 +28,7 @@ chmod +x bin/metron-webhook
 chmod +x bin/metron-remote
 
 echo "Creating aws config file" >> metron_install.log
-mkdir .aws
+mkdir -p .aws
 echo "[metron]\nregion = $region" >> .aws/config
 
 echo "Installing node s3 client" >> metron_install.log

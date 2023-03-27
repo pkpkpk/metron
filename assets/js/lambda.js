@@ -45,7 +45,7 @@ exports.handler = async(event, _ctx) => {
         const startSessionCommand = new StartSessionCommand({Target: instanceId});
         const startSessionData = await ssm.send(startSessionCommand);
         const sessionId = startSessionData.SessionId;
-        var cmds = [`metron-webhook '${JSON.stringify(event)}'`];
+        var cmds = [`./bin/metron-webhook '${JSON.stringify(event)}'`];
         if (shouldShutdownInstance){ cmds.push('shutdown -h now') };
         const sendCommandParams = {
           DocumentName: 'AWS-RunShellScript',

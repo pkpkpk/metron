@@ -103,38 +103,36 @@
    :Parameters [#js{"ParameterKey" "KeyName"
                     "ParameterValue" key-pair-name}]})
 
-(defn upload-files-to-bucket [{:keys [bucket-name region] :as opts}]
+(defn upload-files-to-bucket [{:keys [Bucket region] :as opts}] ;;TODO zip archive?
   (with-promise out
-    (take! (bkt/upload-files ["dist/metron_webhook_handler.js"
-                              "dist/metron_remote_handler.js"
+    (take! (bkt/upload-files [(util/dist-path "metron_webhook_handler.js")
+                              (util/dist-path "metron_remote_handler.js")
                               (util/asset-path "scripts" "metron-remote.sh")
                               (util/asset-path "scripts" "metron-webhook.sh")
                               (util/asset-path "scripts" "install.sh")])
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (let [config (pr-str {:region region :bucket-name bucket-name})]
-            (pipe1 (bkt/put-object "bin/config.edn" config) out)))))))
+          (let [config (pr-str {:region region :Bucket Bucket})]
+            (pipe1 (bkt/put-object "config.edn" config) out)))))))
 
-
-
-
-(defn install [{:keys [bucket-name region InstanceId] :as opts}]
-  (assert (some? bucket-name))
+(defn install [{:keys [Bucket region InstanceId] :as opts}]
+  (assert (some? Bucket))
   (assert (some? region))
   (with-promise out
-    (info "uploading files to " bucket-name)
+    (info "Uploading files to " Bucket)
     (take! (upload-files-to-bucket opts)
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (take! (let [cmd (str "aws s3 cp s3://" bucket-name "/install.sh install.sh")]
-                   (info "downloading file from " bucket-name " to " InstanceId)
+          (take! (let [cmd (str "aws s3 cp s3://" Bucket "/install.sh install.sh")]
+                   (info "Downloading files from " Bucket " to " InstanceId)
                    (ssm/run-script InstanceId cmd))
             (fn [[err ok :as res]]
               (if err
                 (put! out res)
-                (let [cmd (str "chmod +x ./install.sh && ./install.sh " bucket-name " " region)]
+                (let [cmd (str "chmod +x ./install.sh && ./install.sh " Bucket " " region)]
+                  (info "Installing handlers on instance " InstanceId)
                   (pipe1 (ssm/run-script InstanceId cmd) out))))))))))
 
 ;; cleanup bucket & install script?
@@ -143,7 +141,7 @@
   [{:keys [key-pair-name] :as opts}]
   (with-promise out
     (take! (bkt/ensure-bucket opts)
-      (fn [[err bucket-name :as res]]
+      (fn [[err Bucket :as res]]
         (if err
           (put! out res)
           (take! (kp/validate-keypair key-pair-name)
@@ -154,7 +152,7 @@
                   (fn [[err {InstanceId :InstanceId :as outputs} :as res]]
                     (if err
                       (put! out res)
-                      (take! (install (assoc opts :bucket-name bucket-name
+                      (take! (install (assoc opts :Bucket Bucket
                                                   :InstanceId InstanceId))
                         (fn [[err ok :as res]]
                           (if err

@@ -8,7 +8,7 @@
             [cljs.reader :refer [read-string]]
             [clojure.string :as string]
             [goog.object]
-            [metron.bucket :as bkt]
+            [metron.aws.s3 :as s3]
             [metron.git :as g]
             [metron.docker :as d]
             [metron.util :as util :refer [*debug* pp]]))
@@ -46,16 +46,18 @@
        (.write (.. js/process -stderr) (pr-str output))))
    (js/process.exit code)))
 
+(def ^:dynamic *bucket*)
+
 (defn report-results [[err ok :as res]]
-  (io/spit "result.edn" (pp res))
-  (take! (bkt/put-object "result.edn" (pp res))
+  (io/spit "result.edn" res)
+  (take! (s3/put-object *bucket* "result.edn" res)
     (fn [_]
       (if err
         (exit 1 (.-message err))
         (exit 0)))))
 
 (defn handle-ping [event]
-  (take! (bkt/put-object "pong.edn" (pp event))
+  (take! (s3/put-object *bucket* "pong.edn" event)
     (fn [[err ok :as res]]
       (if err
         (exit 1 (hash-map :msg (str "handle-ping put-object error: " (.-message err)) :stack (.-stack err)))
@@ -75,7 +77,7 @@
 
 (defn handle-event [{:keys [x-github-event ref] :as event}]
   (let []
-    (io/spit "event.edn" (pp event))
+    (io/spit "event.edn" event)
     (case x-github-event
       "ping" (handle-ping event)
       "push" (handle-push event)
@@ -86,20 +88,19 @@
   (if (and (nil? (goog.object.get (.-env js/process) "AWS_REGION"))
            (nil? (goog.object.get (.-env js/process) "AWS_PROFILE")))
     (exit 1 [{:msg "please run with AWS_REGION or AWS_PROFILE=metron"}])
-    (let [{:keys [bucket-name] :as cfg} (read-string (io/slurp "config.edn"))]
-      (if (nil? bucket-name)
-        (exit 1 [{:msg "missing bucket-name in config.edn"}])
+    (let [{:keys [Bucket] :as cfg} (read-string (io/slurp "config.edn"))]
+      (if (nil? Bucket)
+        (exit 1 [{:msg "missing Bucket in config.edn"}])
         (if (nil? raw-event)
           (exit 1 [{:msg "expected json string in first arg"}])
           (do
-            (set! bkt/*bucket-name* bucket-name)
+            (set! *bucket* Bucket)
             (io/spit "event.json" raw-event)
             (handle-event (parse-event raw-event))))))))
 
 (.on js/process "uncaughtException"
   (fn [err origin]
     (println "uncaughtException:" {:err err :origin origin})
-    (io/spit "uncaughtException.edn" {:err err :origin origin})
-    (bkt/put-object "uncaughtException.edn" (pp {:err err :origin origin}))))
+    (io/spit "uncaughtException.edn" {:err err :origin origin})))
 
 (set! *main-cli-fn* -main)

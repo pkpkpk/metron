@@ -5,7 +5,7 @@
             [cljs.pprint :refer [pprint]]
             [clojure.string :as string]))
 
-(defn pp [x](with-out-str (pprint x)))
+(defn pp [x] (with-out-str (pprint x)))
 
 (defn pipe1 [a b]
   (take! a (fn [v] (put! b v)))

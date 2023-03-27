@@ -171,6 +171,22 @@
                 (put! out res)
                 (put! out [nil "Webhook creation complete. Instance is shutting down."])))))))))
 
+(defn test-ping
+  ([]
+   (with-promise out
+     (take! (instance/instance-id)
+       (fn [[err ok :as res]]
+         (if err
+           (put! out res)
+           (pipe1 (test-ping ok) out))))))
+  ([iid]
+    (with-promise out
+      (let [json "{}"]
+        (take! (ssm/run-script iid "./bin/metron-webhook")
+          (fn [[{:keys [StandardErrorContent] :as err} ok :as res]]
+            (put! out res)
+            ))))))
+
 (defn stack-params [InstanceId WebhookSecret]
   (let [wh-secret #js{"ParameterKey" "WebhookSecret"
                       "ParameterValue" WebhookSecret}
