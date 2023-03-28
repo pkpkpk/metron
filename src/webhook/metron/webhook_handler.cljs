@@ -43,8 +43,10 @@
   ([code output]
    (when output
      (if (zero? code)
-       (.write (.. js/process -stdout) (pr-str output))
-       (.write (.. js/process -stderr) (pr-str output))))
+       (log/stdout (pr-str output))
+       (do
+         (log/err output)
+         (log/stdout (pr-str output)))))
    (js/process.exit code)))
 
 (def ^:dynamic *bucket*)
@@ -84,24 +86,27 @@
       "push" (handle-push event)
       (report-results [{:msg (str "unrecognized event '" x-github-event "'")}]))))
 
+(def path (js/require "path"))
+
 (defn -main
   [raw-event]
   (log/info "starting metron.webhook-handler")
   (if (and (nil? (goog.object.get (.-env js/process) "AWS_REGION"))
            (nil? (goog.object.get (.-env js/process) "AWS_PROFILE")))
     (exit 1 [{:msg "please run with AWS_REGION or AWS_PROFILE=metron"}])
-    (let [{:keys [Bucket] :as cfg} (read-string (io/slurp "config.edn"))]
+    (let [{:keys [Bucket] :as cfg} (read-string (io/slurp (.join path js/__dirname "config.edn")))]
       (if (nil? Bucket)
         (exit 1 [{:msg "missing Bucket in config.edn"}])
-        (if (nil? raw-event)
+        (if (or (nil? raw-event) (string/blank? raw-event))
           (exit 1 [{:msg "expected json string in first arg"}])
           (do
+            (log/info "raw-event:" (type raw-event) raw-event)
             (set! *bucket* Bucket)
             (handle-event (parse-event raw-event))))))))
 
 (.on js/process "uncaughtException"
   (fn [err origin]
     (log/fatal {:err err :origin origin})
-    (set! (.-exitCode js/process) 1)))
+    (set! (.-exitCode js/process) 99)))
 
 (set! *main-cli-fn* -main)
