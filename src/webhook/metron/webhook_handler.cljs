@@ -1,5 +1,5 @@
 (ns metron.webhook-handler
-  (:require-macros [metron.macros :refer [with-promise]])
+  (:require-macros [metron.macros :refer [with-promise edn-res-chan]])
   (:require [cljs.core.async :refer [promise-chan put! take!]]
             [cljs.nodejs :as nodejs]
             [cljs-node-io.core :as io]
@@ -8,18 +8,32 @@
             [cljs.reader :refer [read-string]]
             [clojure.string :as string]
             [goog.object]
-            [metron.aws.s3 :as s3]
             [metron.git :as g]
             [metron.docker :as d]
             [metron.logging :as log]
-            [metron.util :as util]))
+            [metron.util :as util]
+            ["path"]))
 
 (nodejs/enable-util-print!)
 
+(def put-object
+  (let [S3 (js/require "@aws-sdk/client-s3")
+        {:keys [Bucket region]} (read-string (io/slurp (.join path js/__dirname "config.edn")))
+        client (new (.-S3Client S3) #js{:region region})
+        send (fn [cmd] (edn-res-chan (.send client cmd)))]
+    (fn [key val]
+      (send (new (.-PutObjectCommand S3)
+                 #js{:Bucket Bucket
+                     :Key key
+                     :Body (if (string? val) val (pr-str val))})))))
+
+(defn ->clj [json] (js->clj json :keywordize-keys true))
+
 (defn parse-event [event]
   (let [json (js/JSON.parse event)
-        repo (js->clj (.. json -body -repository) :keywordize-keys true)
-        head_commit (some-> (.. json -body -head_commit) (js->clj :keywordize-keys true))
+        repo (some-> (.. json -body) (.. -repository) ->clj)
+        head_commit (some->  (.. json -body) (.. -head_commit) ->clj)
+        query-params (some-> (.. json -queryStringParameters) ->clj)
         repo-ks [:default_branch
                  :full_name
                  :git_url
@@ -31,40 +45,36 @@
                  :default_branch
                  :pushed_at]]
     (assoc (select-keys repo repo-ks)
-           :before (.. json -body -before)
-           :after (.. json -body -after)
-           :ref (.. json -body -ref)
+           :before (some-> (.. json -body) (.. -before))
+           :after (some-> (.. json -body) (.. -after))
+           :ref (some-> (.. json -body) (.. -ref))
            :head_commit head_commit
-           :query-params (js->clj (.-queryStringParameters json) :keywordize-keys true)
+           :query-params query-params
            :x-github-event (goog.object.get (.. json -headers) "x-github-event"))))
 
 (defn exit
   ([code] (exit code nil))
   ([code output]
    (when output
-     (if (zero? code)
-       (log/stdout (pr-str output))
-       (do
-         (log/err output)
-         (log/stdout (pr-str output)))))
+     (log/stdout (pr-str output))
+     (when-not (zero? code)
+       (log/err output)))
    (js/process.exit code)))
 
-(def ^:dynamic *bucket*)
-
 (defn report-results [[err ok :as res]]
-  (io/spit "result.edn" res)
-  (take! (s3/put-object *bucket* "result.edn" res)
-    (fn [_]
+  (take! (put-object "result.edn" res)
+    (fn [[s3-err]]
+      (when s3-err (log/warn s3-err))
       (if err
-        (exit 1 (.-message err))
-        (exit 0)))))
+        (exit 1 res)
+        (exit 0 res)))))
 
 (defn handle-ping [event]
-  (take! (s3/put-object *bucket* "pong.edn" event)
+  (take! (put-object "pong.edn" event)
     (fn [[err ok :as res]]
       (if err
         (exit 1 (hash-map :msg (str "handle-ping put-object error: " (.-message err)) :stack (.-stack err)))
-        (exit 0)))))
+        (exit 0 [nil {:msg (str "pong.edn has successfully been put in bucket")}])))))
 
 (defn handle-push [{:as event}]
   (when (= (:ref event) "refs/heads/metron")
@@ -86,23 +96,11 @@
       "push" (handle-push event)
       (report-results [{:msg (str "unrecognized event '" x-github-event "'")}]))))
 
-(def path (js/require "path"))
-
-(defn -main
-  [raw-event]
-  (log/info "starting metron.webhook-handler")
-  (if (and (nil? (goog.object.get (.-env js/process) "AWS_REGION"))
-           (nil? (goog.object.get (.-env js/process) "AWS_PROFILE")))
-    (exit 1 [{:msg "please run with AWS_REGION or AWS_PROFILE=metron"}])
-    (let [{:keys [Bucket] :as cfg} (read-string (io/slurp (.join path js/__dirname "config.edn")))]
-      (if (nil? Bucket)
-        (exit 1 [{:msg "missing Bucket in config.edn"}])
-        (if (or (nil? raw-event) (string/blank? raw-event))
-          (exit 1 [{:msg "expected json string in first arg"}])
-          (do
-            (log/info "raw-event:" (type raw-event) raw-event)
-            (set! *bucket* Bucket)
-            (handle-event (parse-event raw-event))))))))
+(defn -main [raw-event]
+  (let []
+    (if (or (nil? raw-event) (string/blank? raw-event))
+      (exit 1 [{:msg "expected json string in first arg"}])
+      (handle-event (parse-event raw-event)))))
 
 (.on js/process "uncaughtException"
   (fn [err origin]

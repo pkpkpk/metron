@@ -29,7 +29,7 @@ chmod +x bin/metron-remote
 
 echo "Creating aws config file" >> metron_install.log
 mkdir -p .aws
-echo "[metron]\nregion = $region" >> .aws/config
+echo "[default]\nregion = $region" >> .aws/config
 
 echo "Installing node s3 client" >> metron_install.log
 npm install @aws-sdk/client-s3 >> metron_install.log

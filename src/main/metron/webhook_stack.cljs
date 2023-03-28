@@ -11,7 +11,7 @@
             [metron.instance-stack :as instance]
             [metron.keypair :as kp]
             [metron.stack :as stack]
-            [metron.logging :refer [info] :as log]
+            [metron.logging :as log]
             [metron.util :refer [pipe1] :as util]))
 
 (def describe-stack (partial stack/describe-stack "metron-webhook-stack"))
@@ -172,6 +172,28 @@
                 (put! out res)
                 (put! out [nil "Webhook creation complete. Instance is shutting down."])))))))))
 
+(defn sim-ping
+  ([]
+   (with-promise out
+     (take! (instance/instance-id)
+       (fn [[err ok :as res]]
+         (if err
+           (put! out res)
+           (pipe1 (sim-ping ok) out))))))
+  ([iid]
+    (with-promise out
+      (let [cmd "./bin/metron-webhook \"{\\\"headers\\\":{\\\"x-github-event\\\":\\\"ping\\\"}}\""]
+        (log/info "Testing ping handling..")
+        (take! (ssm/run-script iid cmd)
+          (fn [[err {:keys [ResponseCode StandardOutputContent] :as ok} :as res]]
+            (if err
+              (put! out res)
+              (if (and (zero? ResponseCode)
+                       (string/starts-with? StandardOutputContent "[nil {:msg \"pong.edn has successfully"))
+                (put! out [nil])
+                (put! out [{:msg "unexpected ping test result"
+                            :cause ok}])))))))))
+
 (defn test-ping
   ([]
    (with-promise out
@@ -181,12 +203,23 @@
            (put! out res)
            (pipe1 (test-ping ok) out))))))
   ([iid]
-    (with-promise out
-      (let [json "{}"]
-        (info "Testing ping handling..")
-        (take! (ssm/run-script iid "./bin/metron-webhook")
-          (fn [[err ok :as res]]
-            (put! out res)))))))
+   (with-promise out
+     (take! (sim-ping iid)
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (take! (do
+                   (log/info "waiting for ping response")
+                   (bkt/wait-for-pong))
+            (fn [[err ok :as res]]
+              (if err
+                (put! out res)
+                (take! (do
+                         (log/info "ping response found")
+                         (bkt/delete-pong))
+                  (fn [[err]]
+                    (when err (log/warn err))
+                    (put! out [nil]))))))))))))
 
 ;; test endpoint
 
