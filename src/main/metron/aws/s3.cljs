@@ -1,6 +1,7 @@
 (ns metron.aws.s3
   (:require-macros [metron.macros :refer [with-promise edn-res-chan]])
-  (:require [cljs.core.async :refer [promise-chan put! take!]]))
+  (:require [cljs.core.async :refer [promise-chan put! take!]]
+            [clojure.string :as string]))
 
 (def S3 (js/require "@aws-sdk/client-s3"))
 (def client (new (.-S3Client S3)))
@@ -30,12 +31,22 @@
 
 (defn put-object
   ([bucket-name key obj]
-   (send (new (.-PutObjectCommand S3) #js{:Bucket bucket-name :Key key :Body obj})))
+   (put-object bucket-name key obj nil))
   ([bucket-name key obj metadata]
-   (send (new (.-PutObjectCommand S3) #js{:Bucket bucket-name
-                                          :Key key
-                                          :Body obj
-                                          :Metadata (clj->js metadata)}))))
+   (assert (or (string? obj) (.isBuffer js/Buffer obj)))
+   (let [ct (if (string/ends-with? key ".json")
+              "application/json"
+              (if (string/ends-with? key ".edn")
+                "application/edn"
+                (if (.isBuffer js/Buffer obj)
+                  "application/octet-stream"
+                  "text/plain")))
+         o #js{:Bucket bucket-name
+               :Key key
+               :Body obj
+               :ContentType ct}
+         _(when metadata (set! (.-Metadata o) (clj->js metadata)))]
+     (send (new (.-PutObjectCommand S3) o)))))
 
 (defn get-object [bucket-name key]
   (send (new (.-GetObjectCommand S3) #js{:Bucket bucket-name :Key key})))

@@ -88,16 +88,19 @@
   (println "6) Choose 'Just the push event' and click Add webhook to finish")
   (println ""))
 
+(defn delete-pong [] (bkt/delete-object "pong.edn"))
+(defn wait-for-pong [] (bkt/wait-for-object "pong.edn"))
+
 (defn prompt-webhook-secret-to-user [{ :as opts}]
   (with-promise out
     (go-loop []
       (webhook-secret-prompt opts)
       (<! (util/get-acknowledgment))
       (println "waiting for ping result ...")
-      (let [[err ok :as res] (<! (bkt/wait-for-pong))]
+      (let [[err ok :as res] (<! (wait-for-pong))]
         (if (nil? err)
           (do
-            (<! (bkt/delete-pong))
+            (<! (delete-pong))
             (println "Webhook ping successfully processed!")
             (put! out res))
           (do
@@ -114,8 +117,6 @@
   (println "    git push <gh-remote> metron")
   (println ""))
 
-(defn verify-webhook-push [] (bkt/wait-for-result))
-
 (defn confirm-push-event [pong-event {:as opts}]
   (with-promise out
     (go-loop []
@@ -123,11 +124,11 @@
       (push-event-prompt opts)
       (<! (util/get-acknowledgment))
       (println "waiting for result ...")
-      (let [[err ok :as res] (<! (verify-webhook-push))]
+      (let [[err ok :as res] (<! (bkt/wait-for-result))]
         (if (nil? err)
           (do
             (println "Webhook push successfully processed!")
-            (pipe1 (bkt/get-result) out))
+            (pipe1 (bkt/read-result) out))
           (do
             (println "Failed to process push: " (.-message err))
             (recur)))))))
@@ -150,7 +151,7 @@
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (take! (bkt/delete-pong)
+          (take! (delete-pong)
             (fn [[err ok :as res]]
               (if err
                 (put! out res)
@@ -210,13 +211,13 @@
           (put! out res)
           (take! (do
                    (log/info "waiting for ping response")
-                   (bkt/wait-for-pong))
+                   (wait-for-pong))
             (fn [[err ok :as res]]
               (if err
                 (put! out res)
                 (take! (do
                          (log/info "ping response found")
-                         (bkt/delete-pong))
+                         (delete-pong))
                   (fn [[err]]
                     (when err (log/warn err))
                     (put! out [nil]))))))))))))
@@ -236,6 +237,9 @@
      :TemplateBody (io/slurp (util/asset-path "templates" "webhook_stack.json"))
      :Parameters [instance-id wh-secret wh-src]}))
 
+;; check if already exists first
+;; test ping before creationg
+;; test endpoint before offering configuration
 (defn create-webhook-stack
   [{:keys [key-pair-name] :as opts}]
   (with-promise out

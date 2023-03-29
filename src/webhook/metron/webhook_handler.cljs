@@ -11,12 +11,12 @@
             [metron.git :as g]
             [metron.docker :as d]
             [metron.logging :as log]
-            [metron.util :as util]
+            [metron.util :as util :refer [->clj]]
             ["path"]))
 
 (nodejs/enable-util-print!)
 
-(def put-object
+(def put-edn
   (let [S3 (js/require "@aws-sdk/client-s3")
         {:keys [Bucket region]} (read-string (io/slurp (.join path js/__dirname "config.edn")))
         client (new (.-S3Client S3) #js{:region region})
@@ -25,9 +25,8 @@
       (send (new (.-PutObjectCommand S3)
                  #js{:Bucket Bucket
                      :Key key
+                     :ContentType "application/edn"
                      :Body (if (string? val) val (pr-str val))})))))
-
-(defn ->clj [json] (js->clj json :keywordize-keys true))
 
 (defn parse-event [event]
   (let [json (js/JSON.parse event)
@@ -62,7 +61,7 @@
    (js/process.exit code)))
 
 (defn report-results [[err ok :as res]]
-  (take! (put-object "result.edn" res)
+  (take! (put-edn "result.edn" res)
     (fn [[s3-err]]
       (when s3-err (log/warn s3-err))
       (if err
@@ -70,7 +69,7 @@
         (exit 0 res)))))
 
 (defn handle-ping [event]
-  (take! (put-object "pong.edn" event)
+  (take! (put-edn "pong.edn" event)
     (fn [[err ok :as res]]
       (if err
         (exit 1 (hash-map :msg (str "handle-ping put-object error: " (.-message err)) :stack (.-stack err)))

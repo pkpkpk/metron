@@ -27,6 +27,9 @@
 (defn random-string []
   (.toString (.randomBytes crypto 30) "hex"))
 
+(defn ->clj [o]
+  (js->clj o :keywordize-keys true))
+
 #!==============================================================================
 ;; cli only
 
