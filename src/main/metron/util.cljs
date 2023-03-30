@@ -30,6 +30,17 @@
 (defn ->clj [o]
   (js->clj o :keywordize-keys true))
 
+(defn file-timestamp []
+  (-> (js/Date.)
+      (.toISOString)
+      (string/replace #":" "-")
+      (string/replace #"\.\d{3}" "")))
+
+(defn parse-file-timestamp [timestamp-str]
+  (let [[year, month, day, hours, minutes, seconds] (.split timestamp-str #"[-T:Z]")]
+    (new js/Date year (dec month) day hours minutes seconds)))
+
+
 #!==============================================================================
 ;; cli only
 

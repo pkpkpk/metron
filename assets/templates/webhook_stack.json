@@ -90,7 +90,6 @@
             "WEBHOOK_SECRET" : { "Ref" : "WebhookSecret" },
             "REGION" : { "Ref" : "AWS::Region" },
             "INSTANCE_ID" : {"Ref" : "InstanceId"},
-            "SHOULD_WAIT_FOR_INVOCATION" : false,
             "SHOULD_SHUTDOWN_INSTANCE" : false
           }
         }

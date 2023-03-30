@@ -34,9 +34,8 @@
                      :ContentType "application/edn"
                      :Body (if (string? val) val (pr-str val))})))))
 
-(defn parse-event [event]
-  (let [json (js/JSON.parse event)
-        repo (some-> (.. json -body) (.. -repository) ->clj)
+(defn parse-event [json]
+  (let [repo (some-> (.. json -body) (.. -repository) ->clj)
         head_commit (some->  (.. json -body) (.. -head_commit) ->clj)
         query-params (some-> (.. json -queryStringParameters) ->clj)
         repo-ks [:default_branch
@@ -100,11 +99,11 @@
       "push" (handle-push event)
       (report-results [{:msg (str "unrecognized event '" x-github-event "'")}]))))
 
-(defn -main [raw-event]
-  (let []
-    (io/spit "raw_event.json" raw-event)
-    (if (or (nil? raw-event) (string/blank? raw-event))
-      (exit 1 [{:msg "expected json string in first arg"}])
-      (handle-event (parse-event raw-event)))))
+(defn -main [json-path]
+  (let [file (io/file json-path)]
+    (if-not (.exists file)
+      (exit 1 [{:msg "expected path to json file in first argument"}])
+      (let [json (js/JSON.parse (io/slurp json-path))]
+        (handle-event (parse-event json))))))
 
 (set! *main-cli-fn* -main)

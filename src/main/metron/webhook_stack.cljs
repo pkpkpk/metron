@@ -88,7 +88,6 @@
   (println "6) Choose 'Just the push event' and click Add webhook to finish")
   (println ""))
 
-;;TODO turn pong.edn into a result instead of silent failure for wh
 (defn wait-for-pong []
   (with-promise out
     (log/info "waiting for ping response")
@@ -197,7 +196,9 @@
            (put! out res)
            (pipe1 (sim-ping ok) out))))))
   ([iid]
-    (let [cmd "./bin/metron-webhook \"{\\\"headers\\\":{\\\"x-github-event\\\":\\\"ping\\\"}}\""]
+    (let [cmd ["mkdir events"
+               "echo \"{\\\"headers\\\":{\\\"x-github-event\\\":\\\"ping\\\"}}\" > events/test_ping.json"
+               "./bin/metron-webhook events/test_ping.json"]]
       (ssm/run-script iid cmd))))
 
 (defn test-ping
