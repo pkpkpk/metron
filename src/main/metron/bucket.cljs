@@ -150,8 +150,6 @@
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (take! (read-object "result.edn")
-            (fn [res]
-              (put! out res))))))))
+          (pipe1 (read-object "result.edn") out))))))
 
 

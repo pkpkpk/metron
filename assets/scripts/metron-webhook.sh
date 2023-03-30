@@ -11,3 +11,5 @@ timestamp=$(date +"%Y-%m-%d %H:%M:%S")
 echo "[$timestamp] webhook exited with code $exit_code" | tee -a metron_webhook.log >&2
 
 exit $exit_code
+
+

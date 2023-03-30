@@ -88,8 +88,20 @@
   (println "6) Choose 'Just the push event' and click Add webhook to finish")
   (println ""))
 
-(defn delete-pong [] (bkt/delete-object "pong.edn"))
-(defn wait-for-pong [] (bkt/wait-for-object "pong.edn"))
+;;TODO turn pong.edn into a result instead of silent failure for wh
+(defn wait-for-pong []
+  (with-promise out
+    (log/info "waiting for ping response")
+    (take! (bkt/wait-for-object "pong.edn")
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (take! (do
+                   (log/info "ping response found")
+                   (bkt/delete-object "pong.edn"))
+                (fn [[err]]
+                  (when err (log/warn err))
+                  (put! out [nil]))))))))
 
 (defn prompt-webhook-secret-to-user [{ :as opts}]
   (with-promise out
@@ -100,15 +112,18 @@
       (let [[err ok :as res] (<! (wait-for-pong))]
         (if (nil? err)
           (do
-            (<! (delete-pong))
             (println "Webhook ping successfully processed!")
             (put! out res))
           (do
             (println "Failed to process ping: " (.-message err))
-            (println " - make sure there is no whitespace in secret")
-            (println " - remember to set payload content-type to application/json")
+            (println "In github check recent deliveries under hooks:")
+            (println " - ResponseCode 401: be sure to set payload content-type to application/json")
+            (println " - ResponseCode 402: make sure there is no whitespace in secret")
+            (println " - ResponseCode 403: the url is wrong or the lambda has been deleted")
+            (println " - ResponseCode 204: you sent something other than a ping event")
             (recur)))))))
 
+;;TODO do this automatically
 (defn push-event-prompt [{:as opts}]
   (println "")
   (println "On the metron branch of the configured repo trigger a push event:")
@@ -151,7 +166,7 @@
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (take! (delete-pong)
+          (take! (bkt/delete-object "pong.edn")
             (fn [[err ok :as res]]
               (if err
                 (put! out res)
@@ -182,18 +197,8 @@
            (put! out res)
            (pipe1 (sim-ping ok) out))))))
   ([iid]
-    (with-promise out
-      (let [cmd "./bin/metron-webhook \"{\\\"headers\\\":{\\\"x-github-event\\\":\\\"ping\\\"}}\""]
-        (log/info "Testing ping handling..")
-        (take! (ssm/run-script iid cmd)
-          (fn [[err {:keys [ResponseCode StandardOutputContent] :as ok} :as res]]
-            (if err
-              (put! out res)
-              (if (and (zero? ResponseCode)
-                       (string/starts-with? StandardOutputContent "[nil {:msg \"pong.edn has successfully"))
-                (put! out [nil])
-                (put! out [{:msg "unexpected ping test result"
-                            :cause ok}])))))))))
+    (let [cmd "./bin/metron-webhook \"{\\\"headers\\\":{\\\"x-github-event\\\":\\\"ping\\\"}}\""]
+      (ssm/run-script iid cmd))))
 
 (defn test-ping
   ([]
@@ -205,22 +210,16 @@
            (pipe1 (test-ping ok) out))))))
   ([iid]
    (with-promise out
+     (log/info "Testing ping handling..")
      (take! (sim-ping iid)
-      (fn [[err ok :as res]]
+      (fn [[err {:keys [ResponseCode StandardOutputContent] :as ok} :as res]]
         (if err
           (put! out res)
-          (take! (do
-                   (log/info "waiting for ping response")
-                   (wait-for-pong))
-            (fn [[err ok :as res]]
-              (if err
-                (put! out res)
-                (take! (do
-                         (log/info "ping response found")
-                         (delete-pong))
-                  (fn [[err]]
-                    (when err (log/warn err))
-                    (put! out [nil]))))))))))))
+          (if (and (zero? ResponseCode)
+                   (string/starts-with? StandardOutputContent "[nil {:msg \"pong.edn has successfully"))
+            (pipe1 (wait-for-pong) out)
+            (put! out [{:msg "unexpected ping test result"
+                        :cause ok}]))))))))
 
 ;; test endpoint
 
@@ -237,10 +236,7 @@
      :TemplateBody (io/slurp (util/asset-path "templates" "webhook_stack.json"))
      :Parameters [instance-id wh-secret wh-src]}))
 
-;; check if already exists first
-;; test ping before creationg
-;; test endpoint before offering configuration
-(defn create-webhook-stack
+(defn- check-instance
   [{:keys [key-pair-name] :as opts}]
   (with-promise out
     (take! (bkt/ensure-bucket opts)
@@ -248,18 +244,52 @@
         (if err
           (put! out res)
             (take! (instance/ensure-ok opts)
-              (fn [[err {InstanceId :InstanceId} :as res]]
+              (fn [[err {InstanceId :InstanceId :as outputs} :as res]]
                 (if err
                   (put! out res)
-                  (let [WebhookSecret (util/random-string)]
-                    (take! (stack/create (stack-params InstanceId WebhookSecret))
-                      (fn [[err outputs :as res]]
-                        (if err
-                          (put! out res)
-                          (take! (configure-webhook outputs)
-                            (fn [[err ok :as res]]
-                              (if err
-                                (put! out res)
-                                (pipe1 (shutdown) out))))))))))))))))
+                  (take! (test-ping InstanceId)
+                    (fn [[err ok :as res]]
+                      (if err
+                        (put! out res)
+                        (put! out [nil outputs]))))))))))))
 
-(defn delete-webhook-stack [](stack/delete "metron-webhook-stack"))
+(defn- create-new-stack [InstanceId]
+  (with-promise out
+    (let [WebhookSecret (util/random-string)]
+      (take! (stack/create (stack-params InstanceId WebhookSecret))
+        (fn [[err outputs :as res]]
+          (if err
+            (put! out res)
+            (take! (configure-webhook outputs)
+              (fn [[err ok :as res]]
+                (if err
+                  (put! out res)
+                  (pipe1 (shutdown) out))))))))))
+
+(defn stack-exists? []
+  (with-promise out
+    (take! (describe-stack)
+      (fn [[err ok :as res]]
+        (if err
+          (if (string/ends-with? (.-message err) "does not exist")
+            (put! out [nil false])
+            (put! out res))
+          (put! out [nil true]))))))
+
+(defn create-webhook-stack [opts]
+  (with-promise out
+    (take! (stack-exists?)
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (if (true? ok)
+            (pipe1 (configure-webhook) out)
+            (take! (check-instance opts)
+              (fn [[err {InstanceId :InstanceId} :as res]]
+                (if err ;; TODO under what conditions can we re-install to proceed?
+                  (put! out res)
+                  (do
+                    (log/info "Existing instance is ok, creating webhook stack")
+                    (pipe1 (create-new-stack InstanceId) out)))))))))))
+
+(defn delete-webhook-stack [] (stack/delete "metron-webhook-stack"))

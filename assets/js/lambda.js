@@ -31,60 +31,66 @@ async function waitForInstanceOk() {
 }
 
 exports.handler = async(event, _ctx) => {
-    if (!verify_signature(event.body, event.headers["x-hub-signature-256"])) {
-      return {statusCode: 401, body: "bad signature"};
-    } else {
-      event.body = JSON.parse(event.body);
-      const event_type = event.headers["x-github-event"];
-      if (!((event_type === "ping") || ((event_type === "push") && (event.body.ref  === "refs/heads/metron")) )){
-        return {status: 200, body: "no-op event"}
-      }
-      try {
-        await waitForInstanceOk();
-        const ssm = new SSMClient();
-        const startSessionCommand = new StartSessionCommand({Target: instanceId});
-        const startSessionData = await ssm.send(startSessionCommand);
-        const sessionId = startSessionData.SessionId;
-        var cmds = [`./bin/metron-webhook '${JSON.stringify(event)}'`];
-        if (shouldShutdownInstance){ cmds.push('shutdown -h now') };
-        const sendCommandParams = {
-          DocumentName: 'AWS-RunShellScript',
-          Parameters: {workingDirectory: ["/home/ec2-user"],commands: cmds},
-          Targets: [{Key: 'InstanceIds', Values: [instanceId]}]
-        };
-        const sendCommandCommand = new SendCommandCommand(sendCommandParams);
-        const sendCommandData = await ssm.send(sendCommandCommand);
-        const commandId = sendCommandData.Command.CommandId;
-        const endSessionParams = {SessionId: sessionId, Target: instanceId};
-        const terminateSessionCommand = new TerminateSessionCommand(endSessionParams);
-        if (!shouldWaitForInvocation) {
-          await ssm.send(terminateSessionCommand);
-          return {status: 200, body: sendCommandData};
-        }
-        const getCommandInvocationParams = {CommandId: commandId, InstanceId: instanceId};
-        let stdout = "";
-        let stderr = "";
-        let getCommandInvocationResponse;
-        await new Promise(resolve => setTimeout(resolve, 1000))
-        while (true) {
-          const getCommandInvocationCommand = new GetCommandInvocationCommand(getCommandInvocationParams);
-          getCommandInvocationResponse = await ssm.send(getCommandInvocationCommand);
-          if (getCommandInvocationResponse.Status === "InProgress") {
-            await new Promise(resolve => setTimeout(resolve, 5000));
-          } else {
-            stdout += getCommandInvocationResponse.StandardOutputContent;
-            stderr += getCommandInvocationResponse.StandardErrorContent;
-            break;
-          }
-        }
-        await ssm.send(terminateSessionCommand);
-        return {statusCode: 200, body: getCommandInvocationResponse}
-      } catch (err) {
-        console.error(err)
-        return {
-          statusCode: 500,
-          body: err
-        };
-      }
+    if (!("application/json" === event.headers["content-type"])) {
+      return {statusCode: 401, body: "bad content-type, expected json"};
     }
+    if (!verify_signature(event.body, event.headers["x-hub-signature-256"])) {
+      return {statusCode: 402, body: "bad signature"};
+    }
+
+    event.body = JSON.parse(event.body);
+    const event_type = event.headers["x-github-event"];
+
+    if (!((event_type === "ping") || ((event_type === "push") && (event.body.ref  === "refs/heads/metron")) )){
+      return {status: 204, body: "no-op event for ref "+event.body.ref}
+    }
+
+    try {
+      await waitForInstanceOk();
+      const ssm = new SSMClient();
+      const startSessionCommand = new StartSessionCommand({Target: instanceId});
+      const startSessionData = await ssm.send(startSessionCommand);
+      const sessionId = startSessionData.SessionId;
+      var cmds = [`./bin/metron-webhook '${JSON.stringify(event)}'`];
+      if (shouldShutdownInstance){ cmds.push('shutdown -h now') };
+      const sendCommandParams = {
+        DocumentName: 'AWS-RunShellScript',
+        Parameters: {workingDirectory: ["/home/ec2-user"],commands: cmds},
+        Targets: [{Key: 'InstanceIds', Values: [instanceId]}]
+      };
+      const sendCommandCommand = new SendCommandCommand(sendCommandParams);
+      const sendCommandData = await ssm.send(sendCommandCommand);
+      const commandId = sendCommandData.Command.CommandId;
+      const endSessionParams = {SessionId: sessionId, Target: instanceId};
+      const terminateSessionCommand = new TerminateSessionCommand(endSessionParams);
+      if (!shouldWaitForInvocation) {
+        await ssm.send(terminateSessionCommand);
+        return {status: 200, body: sendCommandData};
+      }
+      const getCommandInvocationParams = {CommandId: commandId, InstanceId: instanceId};
+      let stdout = "";
+      let stderr = "";
+      let getCommandInvocationResponse;
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      while (true) {
+        const getCommandInvocationCommand = new GetCommandInvocationCommand(getCommandInvocationParams);
+        getCommandInvocationResponse = await ssm.send(getCommandInvocationCommand);
+        if (getCommandInvocationResponse.Status === "InProgress") {
+          await new Promise(resolve => setTimeout(resolve, 5000));
+        } else {
+          stdout += getCommandInvocationResponse.StandardOutputContent;
+          stderr += getCommandInvocationResponse.StandardErrorContent;
+          break;
+        }
+      }
+      await ssm.send(terminateSessionCommand);
+      return {statusCode: 200, body: getCommandInvocationResponse}
+    } catch (err) {
+      console.error(err)
+      return {
+        statusCode: 500,
+        body: err
+      };
+    }
+
 };

@@ -16,6 +16,12 @@
 
 (nodejs/enable-util-print!)
 
+(.on js/process "uncaughtException"
+     (fn [err origin]
+       (log/fatal origin)
+       (log/fatal (.-stack err))
+       (set! (.-exitCode js/process) 99)))
+
 (def put-edn
   (let [S3 (js/require "@aws-sdk/client-s3")
         {:keys [Bucket region]} (read-string (io/slurp (.join path js/__dirname "config.edn")))
@@ -72,8 +78,8 @@
   (take! (put-edn "pong.edn" event)
     (fn [[err ok :as res]]
       (if err
-        (exit 1 (hash-map :msg (str "handle-ping put-object error: " (.-message err)) :stack (.-stack err)))
-        (exit 0 [nil {:msg (str "pong.edn has successfully been put in bucket")}])))))
+        (exit 1 [{:msg "error writing ping handling to bucket" :cause (.-stack err)}])
+        (exit 0 [nil {:msg "pong.edn has successfully been put in bucket"}])))))
 
 (defn handle-push [{:as event}]
   (when (= (:ref event) "refs/heads/metron")
@@ -84,8 +90,7 @@
             (report-results res)
             (take! (d/process-event event) report-results))))
       (catch js/Error err
-        (report-results [{:msg "Uncaught error"
-                          :cause err}])))))
+        (report-results [{:msg "Unhandled error" :cause (.-stack err)}])))))
 
 (defn handle-event [{:keys [x-github-event ref] :as event}]
   (let []
@@ -97,13 +102,9 @@
 
 (defn -main [raw-event]
   (let []
+    (io/spit "raw_event.json" raw-event)
     (if (or (nil? raw-event) (string/blank? raw-event))
       (exit 1 [{:msg "expected json string in first arg"}])
       (handle-event (parse-event raw-event)))))
-
-(.on js/process "uncaughtException"
-  (fn [err origin]
-    (log/fatal {:err err :origin origin})
-    (set! (.-exitCode js/process) 99)))
 
 (set! *main-cli-fn* -main)
