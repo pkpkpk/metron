@@ -30,7 +30,6 @@
    (send (new (.-CreateKeyPairCommand EC2) #js{:DryRun dry-run?
                                                :KeyName key-pair-name}))))
 
-
 (defn describe-instances
   ([]
    (send (new (.-DescribeInstancesCommand EC2) #js{})))
@@ -44,6 +43,12 @@
         (if err
           (put! out res)
           (put! out [nil (get-in ok [:Reservations 0 :Instances 0])]))))))
+
+(defn set-user-data
+  [iid user-data]
+  (send (new (.-ModifyInstanceAttributeCommand EC2)
+             #js{:InstanceId iid
+                 :UserData #js{"Value" (js/Buffer.from (.toString (.from js/Buffer user-data) "base64"))}})))
 
 (defn start-instance [iid]
   (send (new (.-StartInstancesCommand EC2) #js{:InstanceIds #js[iid]})))

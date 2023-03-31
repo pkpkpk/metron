@@ -71,7 +71,12 @@
               (take! (do (log/info "starting instance...") (ec2/start-instance iid))
                 (fn [_]
                   (log/info "Waiting for instance ok" iid)
-                  (pipe1 (ec2/wait-for-ok iid) out))))))))))
+                  (take! (ec2/wait-for-ok iid)
+                    (fn [[err ok :as res]]
+                      (if err
+                        (put! out res)
+                        ;; could overwrite userdata, requires shutting down instance
+                        (pipe1 (ssm/run-script iid "sudo service docker start") out)))))))))))))
 
 (def start-instance wait-for-instance)
 
@@ -136,6 +141,7 @@
                   (log/info "Installing handlers on instance " InstanceId)
                   (pipe1 (ssm/run-script InstanceId cmd) out))))))))))
 
+;; check if already exists
 ;; cleanup bucket & install script?
 
 (defn create-instance-stack

@@ -61,7 +61,7 @@
           (put! out res)
           (pipe1 (s3/get-object bucket-name key) out))))))
 
-(defn read-object "if the object is recognized as json or edn, returns edn"
+(defn read-object "if the object is recognized as json or edn, returns read as clj"
   [key]
   (with-promise out
     (take! (get-bucket-name)
@@ -76,11 +76,17 @@
                   (cond
                     (or (string/ends-with? key "json")
                         (= ContentType "application/json"))
-                    (put! out [nil (->clj (js/JSON.parse (.toString buf "utf8")))])
+                    (try
+                      (put! out [nil (->clj (js/JSON.parse (.toString buf "utf8")))])
+                      (catch js/Error e
+                        (put! out [{:msg (str "error parsing json object " key) :cause (.-stack e)}])))
 
                     (or (string/ends-with? key "edn")
                         (= ContentType "application/edn"))
-                    (put! out [nil (read-string (.toString buf "utf8"))])
+                    (try
+                      (put! out [nil (read-string (.toString buf "utf8"))])
+                      (catch js/Error e
+                        (put! out [{:msg (str "error reading edn object " key) :cause (.-stack e)}])))
 
                     true
                     (condp = ContentType

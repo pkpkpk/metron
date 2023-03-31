@@ -58,7 +58,6 @@
 
 (def cli-options
   [["-h" "--help"]
-   ; ["-v" "--verbose"]
    [nil "--create-webhook" "create webhook stack"]
    [nil "--delete-webhook" "delete webhook stack"]
    [nil "--configure-webhook" "add/edit webhook with existing stack"]
@@ -71,9 +70,10 @@
    [nil "--ssh" "return ssh dst into instance. without elastic-ip configured, changes every start/stop cycle"]
 
    ["-k" "--key-pair-name KEYPAIRNAME" "name of a SSH key registered with ec2"]
+   ; ["-v" "--verbose"]
    ; ["-b" "--bucket BUCKETNAME" "name of bucket to use. If one is not provided one is created"]
-   ["-p" "--profile AWS_PROFILE" "Defers to environment. Once set will be stored and reused"]
-   ["-r" "--region AWS_REGION" "Defers to environment. Once set will be stored and reused"]
+   ; ["-p" "--profile AWS_PROFILE" "Defers to environment. Once set will be stored and reused"]
+   ; ["-r" "--region AWS_REGION" "Defers to environment. Once set will be stored and reused"]
    ])
 
 (defn error-msg [errors]
@@ -132,7 +132,7 @@
        :opts options
        :exit-message (usage summary) :ok? true})))
 
-(defn resolve-region []
+(defn resolve-region [opts]
   (goog.object.get (.-env js/process) "AWS_REGION"))
 
 (defn dispatch-action [action opts]
@@ -150,7 +150,7 @@
 
 (defn -main [& args]
   (let [{:keys [action opts exit-message ok?] :as arg} (validate-args args)
-        region (resolve-region)]
+        region (resolve-region opts)]
     (cond
       (nil? region)
       (exit 1 "please run with AWS_REGION set")

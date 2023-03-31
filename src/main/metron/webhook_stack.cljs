@@ -65,7 +65,7 @@
 
 (defn configure-deploy-key [{iid :InstanceId, :as opts}]
   (assert (some? iid))
-  (println "retrieving deploy-key from stack instance...")
+  (log/info "retrieving deploy-key from stack instance...")
   (with-promise out
     (take! (instance/wait-for-instance iid)
       (fn [[err ok :as res]]
