@@ -44,11 +44,22 @@
           (put! out res)
           (put! out [nil (get-in ok [:Reservations 0 :Instances 0])]))))))
 
-(defn set-user-data
+(defn get-user-data [iid]
+  (with-promise out
+    (take! (send (new (.-DescribeInstanceAttributeCommand EC2)
+                      #js{:InstanceId iid :Attribute "userData"}))
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (let [base64 (get-in ok [:UserData :Value])
+                utf8 (.toString (.from js/Buffer base64 "base64") "utf8")]
+            (put! out [nil utf8])))))))
+
+(defn set-user-data "just give it a normal string"
   [iid user-data]
   (send (new (.-ModifyInstanceAttributeCommand EC2)
              #js{:InstanceId iid
-                 :UserData #js{"Value" (js/Buffer.from (.toString (.from js/Buffer user-data) "base64"))}})))
+                 :UserData #js{"Value" (js/Buffer.from user-data)}})))
 
 (defn start-instance [iid]
   (send (new (.-StartInstancesCommand EC2) #js{:InstanceIds #js[iid]})))

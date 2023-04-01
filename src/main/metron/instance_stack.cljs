@@ -5,7 +5,6 @@
             [clojure.string :as string]
             [cljs-node-io.core :as io]
             [metron.aws.ec2 :as ec2]
-            [metron.aws.lambda :as lam]
             [metron.aws.ssm :as ssm]
             [metron.bucket :as bkt]
             [metron.keypair :as kp]
@@ -25,7 +24,7 @@
           (put! out res)
           (put! out [nil InstanceId]))))))
 
-(defn describe-instance []
+(defn describe []
   (with-promise out
     (take! (get-stack-outputs)
       (fn [[err {:keys [InstanceId] :as ok} :as res]]
@@ -35,7 +34,7 @@
 
 (defn ssh-address []
   (with-promise out
-    (take! (describe-instance)
+    (take! (describe)
       (fn [[err ok :as res]]
         (if err
           (put! out res)
@@ -46,20 +45,20 @@
 
 (defn instance-state []
   (with-promise out
-    (take! (describe-instance)
+    (take! (describe)
       (fn [[err ok :as res]]
         (if err
           (put! out res)
           (put! out [nil (get-in ok [:State :Name])]))))))
 
-(defn wait-for-instance
+(defn wait-for-ok
   ([]
    (with-promise out
      (take! (get-stack-outputs)
        (fn [[err {:keys [InstanceId] :as ok} :as res]]
          (if err
            (put! out res)
-           (pipe1 (wait-for-instance InstanceId) out))))))
+           (pipe1 (wait-for-ok InstanceId) out))))))
   ([iid]
    (with-promise out
      (take! (instance-state)
@@ -68,27 +67,43 @@
             (put! out res)
             (if (= "running" ok)
               (put! out [nil])
-              (take! (do (log/info "starting instance...") (ec2/start-instance iid))
+              (take! (do
+                       (log/info "starting instance " iid)
+                       (ec2/start-instance iid))
                 (fn [_]
                   (log/info "Waiting for instance ok" iid)
                   (take! (ec2/wait-for-ok iid)
                     (fn [[err ok :as res]]
                       (if err
                         (put! out res)
-                        ;; could overwrite userdata, requires shutting down instance
-                        (pipe1 (ssm/run-script iid "sudo service docker start") out)))))))))))))
+                        (put! out [nil iid])))))))))))))
 
-(def start-instance wait-for-instance)
-
-(defn stop-instance []
-  (with-promise out
-    (take! (get-stack-outputs)
-      (fn [[err {:keys [InstanceId] :as ok} :as res]]
-        (if (some? err)
-          (put! out res)
-          (if (some? InstanceId)
-            (pipe1 (ec2/stop-instance InstanceId) out)
-            (put! out [nil])))))))
+(defn wait-for-stopped
+  ([]
+   (with-promise out
+     (take! (get-stack-outputs)
+       (fn [[err {:keys [InstanceId] :as ok} :as res]]
+         (if err
+           (put! out res)
+           (pipe1 (wait-for-stopped InstanceId) out))))))
+  ([iid]
+   (with-promise out
+     (take! (instance-state)
+        (fn [[err ok :as res]]
+          (if err
+            (put! out res)
+            (if (= "stopped" ok)
+              (put! out [nil])
+              (take! (do
+                       (log/info "stopping instance " iid)
+                       (ec2/stop-instance iid))
+                (fn [_]
+                  (log/info "Waiting for instance to stop" iid)
+                  (take! (ec2/wait-for-stopped iid)
+                    (fn [[err ok :as res]]
+                      (if err
+                        (put! out res)
+                        (put! out [nil])))))))))))))
 
 (defn run-script [cmd]
   (with-promise out
@@ -103,7 +118,7 @@
 
 (defn stack-params [key-pair-name]
   {:StackName "metron-instance-stack"
-   :DisableRollback true ;;TODO make configurable
+   :DisableRollback true
    :Capabilities #js["CAPABILITY_IAM" "CAPABILITY_NAMED_IAM"]
    :TemplateBody (io/slurp (util/asset-path "templates" "instance_stack.json"))
    :Parameters [#js{"ParameterKey" "KeyName"
@@ -141,8 +156,47 @@
                   (log/info "Installing handlers on instance " InstanceId)
                   (pipe1 (ssm/run-script InstanceId cmd) out))))))))))
 
-;; check if already exists
-;; cleanup bucket & install script?
+(defn docker-service-running? [iid]
+  (with-promise out
+    (take! (ssm/run-script iid "sudo systemctl is-active docker")
+      (fn [[err {:keys [StandardOutputContent] :as ok} :as res]]
+        (if err
+          (put! out res)
+          (put! out [nil (= "active\n" StandardOutputContent)]))))))
+
+(defn start-docker [iid] (ssm/run-script iid "sudo service docker start"))
+
+(defn restart-with-user-data [iid]
+  (with-promise out
+    (log/info "starting reboot process")
+    (take! (wait-for-stopped iid)
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (take! (do
+                   (log/info "overwriting user-data for instance " iid)
+                   (ec2/set-user-data iid (io/slurp (util/asset-path "scripts" "post_install_userdata.sh"))))
+            (fn [[err ok :as res]]
+              (if err
+                (put! out res)
+                (take! (do
+                         (log/info "restarting instance " iid " this may take a few minutes.")
+                         (wait-for-ok iid))
+                  (fn [[err ok :as res]]
+                    (if err
+                      (put! out res)
+                      (take! (do
+                               (log/info "instance ok, testing docker service")
+                               (docker-service-running? iid))
+                        (fn [[err running? :as res]]
+                          (if err
+                            (put! out res)
+                            (if running?
+                              (do
+                                (log/info "docker service running")
+                                (put! out [nil]))
+                              (put! out [{:msg "error starting docker service using user-data"
+                                          :info ok}]))))))))))))))))
 
 (defn create-instance-stack
   [{:keys [key-pair-name] :as opts}]
@@ -164,21 +218,36 @@
                         (fn [[err ok :as res]]
                           (if err
                             (put! out res)
-                            (put! out [nil outputs])))))))))))))))
+                            (take! (restart-with-user-data InstanceId)
+                              (fn [[err ok :as res]]
+                                (if err
+                                  (put! out res)
+                                  (put! out [nil outputs]))))))))))))))))))
 
 (defn delete-instance-stack [] (stack/delete "metron-instance-stack"))
 
 (defn ensure-ok
   "if instance-stack does not exist, create it.
    if instance exists, wake it & return when ready.
+   if docker is not running, start it (and warn)
    Yields instance-stack outputs"
   [opts]
   (with-promise out
-    (take! (wait-for-instance)
-      (fn [[err ok :as res]]
-        (if (nil? err)
-          (pipe1 (get-stack-outputs) out)
+    (take! (wait-for-ok)
+      (fn [[err iid :as res]]
+        (if err
           (if (= "Stack with id metron-instance-stack does not exist" (.-message err))
             (pipe1 (create-instance-stack opts) out)
-            (put! out res)))))))
+            (put! out res))
+          (take! (docker-service-running? iid)
+            (fn [[err running? :as res]]
+              (if running?
+                (pipe1 (get-stack-outputs) out)
+                (do
+                  (log/warn "docker service not running! webhook stacks will not work. check user data")
+                  (take! (start-docker iid)
+                    (fn [[err ok :as res]]
+                      (if err
+                        (put! out res)
+                        (pipe1 (get-stack-outputs) out)))))))))))))
 

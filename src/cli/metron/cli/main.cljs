@@ -142,9 +142,9 @@
     ::configure-webhook (wh/configure-webhook)
     ::create-instance (instance/create-instance-stack opts)
     ::delete-instance (instance/delete-instance-stack)
-    ::status (instance/describe-instance)
-    ::start (instance/wait-for-instance)
-    ::stop (instance/stop-instance)
+    ::status (instance/describe)
+    ::start (instance/wait-for-ok)
+    ::stop (instance/wait-for-stopped)
     ::ssh (instance/ssh-address)
     (to-chan! [[{:msg (str "umatched action: " (pr-str action))}]])))
 

@@ -4,12 +4,10 @@
                                      close! >! <! pipe]]
             [clojure.string :as string]
             [cljs-node-io.core :as io]
-            [metron.aws.ec2 :as ec2]
             [metron.aws.lambda :as lam]
             [metron.aws.ssm :as ssm]
             [metron.bucket :as bkt]
             [metron.instance-stack :as instance]
-            [metron.keypair :as kp]
             [metron.stack :as stack]
             [metron.logging :as log]
             [metron.util :refer [pipe1] :as util]))
@@ -67,7 +65,7 @@
   (assert (some? iid))
   (log/info "retrieving deploy-key from stack instance...")
   (with-promise out
-    (take! (instance/wait-for-instance iid)
+    (take! (instance/wait-for-ok iid)
       (fn [[err ok :as res]]
         (if err
           (put! out res)
@@ -181,11 +179,11 @@
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (take! (instance/stop-instance)
+          (take! (instance/wait-for-stopped)
             (fn [[err ok :as res]]
               (if err
                 (put! out res)
-                (put! out [nil "Webhook creation complete. Instance is shutting down."])))))))))
+                (put! out [nil "Webhook creation complete. Instance is stopped"])))))))))
 
 (defn sim-ping
   ([]
@@ -221,8 +219,6 @@
             (pipe1 (wait-for-pong) out)
             (put! out [{:msg "unexpected ping test result"
                         :cause ok}]))))))))
-
-;; test endpoint
 
 (defn stack-params [InstanceId WebhookSecret]
   (let [wh-secret #js{"ParameterKey" "WebhookSecret"
