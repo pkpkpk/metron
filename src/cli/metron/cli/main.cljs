@@ -140,7 +140,7 @@
     ::create-webhook (wh/create-webhook-stack opts)
     ::delete-webhook (wh/delete-webhook-stack)
     ::configure-webhook (wh/configure-webhook)
-    ::create-instance (instance/create-instance-stack opts)
+    ::create-instance (instance/ensure-ok opts)
     ::delete-instance (instance/delete-instance-stack)
     ::status (instance/describe)
     ::start (instance/wait-for-ok)

@@ -166,37 +166,23 @@
 
 (defn start-docker [iid] (ssm/run-script iid "sudo service docker start"))
 
-(defn restart-with-user-data [iid]
+(defn reboot-with-docker-service [iid]
   (with-promise out
-    (log/info "starting reboot process")
-    (take! (wait-for-stopped iid)
-      (fn [[err ok :as res]]
-        (if err
-          (put! out res)
-          (take! (do
-                   (log/info "overwriting user-data for instance " iid)
-                   (ec2/set-user-data iid (io/slurp (util/asset-path "scripts" "post_install_userdata.sh"))))
-            (fn [[err ok :as res]]
-              (if err
-                (put! out res)
-                (take! (do
-                         (log/info "restarting instance " iid " this may take a few minutes.")
-                         (wait-for-ok iid))
-                  (fn [[err ok :as res]]
-                    (if err
-                      (put! out res)
-                      (take! (do
-                               (log/info "instance ok, testing docker service")
-                               (docker-service-running? iid))
-                        (fn [[err running? :as res]]
-                          (if err
-                            (put! out res)
-                            (if running?
-                              (do
-                                (log/info "docker service running")
-                                (put! out [nil]))
-                              (put! out [{:msg "error starting docker service using user-data"
-                                          :info ok}]))))))))))))))))
+    (let [user-data (io/slurp (util/asset-path "scripts" "post_install_userdata.sh"))]
+      (take! (ec2/restart-with-userdata iid user-data)
+        (fn [[err ok :as res]]
+          (if err
+            (put! out res)
+            (take! (do
+                     (log/info "instance ok, testing docker service")
+                     (docker-service-running? iid))
+              (fn [[err running? :as res]]
+                (if err
+                  (put! out res)
+                  (if running?
+                    (do (log/info "docker service running") (put! out [nil]))
+                    (put! out [{:msg "error starting docker service using user-data"
+                                :info ok}])))))))))))
 
 (defn create-instance-stack
   [{:keys [key-pair-name] :as opts}]
@@ -218,7 +204,7 @@
                         (fn [[err ok :as res]]
                           (if err
                             (put! out res)
-                            (take! (restart-with-user-data InstanceId)
+                            (take! (reboot-with-docker-service InstanceId)
                               (fn [[err ok :as res]]
                                 (if err
                                   (put! out res)

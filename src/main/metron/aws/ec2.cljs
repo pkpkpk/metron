@@ -1,6 +1,8 @@
 (ns metron.aws.ec2
   (:require-macros [metron.macros :refer [with-promise edn-res-chan]])
-  (:require [cljs.core.async :refer [promise-chan put! take!]]))
+  (:require [cljs.core.async :refer [promise-chan put! take!]]
+            [metron.logging :as log]
+            [metron.util :refer [pipe1]]))
 
 (def EC2 (js/require "@aws-sdk/client-ec2"))
 (def client (new (.-EC2Client EC2)))
@@ -93,3 +95,22 @@
                                          :maxDelay *poll-delay*
                                          :maxWaitTime *max-wait-time*}
                                      #js{:InstanceIds #js[iid]})))
+
+#!==============================================================================
+
+(defn restart-with-userdata [iid user-data]
+  (with-promise out
+    (log/info "stopping instance " iid)
+    (take! (wait-for-stopped iid)
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (take! (do
+                   (log/info "overwriting user-data for instance " iid)
+                   (set-user-data iid user-data))
+            (fn [[err ok :as res]]
+              (if err
+                (put! out res)
+                (do
+                  (log/info "restarting instance " iid " this may take a few minutes.")
+                  (pipe1 (wait-for-ok iid) out))))))))))
