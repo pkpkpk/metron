@@ -66,7 +66,7 @@
   (log/info "retrieving deploy-key from stack instance...")
   (with-promise out
     (take! (instance/wait-for-ok iid)
-      (fn [[err ok :as res]]
+      (fn [[err _ :as res]]
         (if err
           (put! out res)
           (take! (generate-deploy-key iid)

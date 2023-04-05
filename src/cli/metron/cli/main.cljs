@@ -1,6 +1,6 @@
 (ns metron.cli.main
   (:require-macros [metron.macros :refer [with-promise]])
-  (:require [cljs.core.async :refer [go >! <! to-chan!]]
+  (:require [cljs.core.async :refer [go >! <! to-chan! put! take!]]
             [cljs.nodejs :as nodejs]
             [cljs-node-io.core :as io]
             [cljs.pprint :refer [pprint]]
@@ -53,7 +53,8 @@
   (->> ["Usage: node metron.js [options]*"
         ""
         "Options:"
-        options-summary]
+        options-summary
+        \newline]
     (string/join \newline)))
 
 (def cli-options

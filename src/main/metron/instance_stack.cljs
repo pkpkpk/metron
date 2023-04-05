@@ -32,17 +32,6 @@
           (put! out res)
           (pipe1 (ec2/describe-instance InstanceId) out))))))
 
-(defn ssh-address []
-  (with-promise out
-    (take! (describe)
-      (fn [[err ok :as res]]
-        (if err
-          (put! out res)
-          (if-not (= "running" (get-in ok [:State :Name]))
-            (put! out [{:msg "Instance is not running!"}])
-            (let [public-dns (get ok :PublicDnsName)]
-              (put! out [nil (str "ec2-user@" public-dns)]))))))))
-
 (defn instance-state []
   (with-promise out
     (take! (describe)
@@ -66,7 +55,7 @@
           (if err
             (put! out res)
             (if (= "running" ok)
-              (put! out [nil])
+              (pipe1 (get-stack-outputs) out)
               (take! (do
                        (log/info "starting instance " iid)
                        (ec2/start-instance iid))
@@ -76,7 +65,19 @@
                     (fn [[err ok :as res]]
                       (if err
                         (put! out res)
-                        (put! out [nil iid])))))))))))))
+                        (pipe1 (get-stack-outputs) out)))))))))))))
+
+(defn ssh-address []
+  (assert (some? (goog.object.get (.-env js/process) "METRON_KEY_PATH")))
+  (with-promise out
+    (take! (wait-for-ok)
+      (fn [[err {:keys [PublicDNS KeyName]} :as res]]
+        (if err
+          (put! out res)
+          (let [key-path (goog.object.get (.-env js/process) "METRON_KEY_PATH")
+                address (str "ec2-user@" PublicDNS)]
+            (put! out [nil (str key-path " " address)])))))))
+
 
 (defn wait-for-stopped
   ([]
