@@ -10,7 +10,7 @@
             [metron.keypair :as kp]
             [metron.webhook-stack :as wh]
             [metron.instance-stack :as instance]
-            [metron.util :as util :refer [pp]]))
+            [metron.util :as util :refer [pp p->res]]))
 
 (nodejs/enable-util-print!)
 
@@ -59,22 +59,17 @@
 
 (def cli-options
   [["-h" "--help"]
+   ; ["-v" "--verbose"]
    [nil "--create-webhook" "create webhook stack"]
    [nil "--delete-webhook" "delete webhook stack"]
    [nil "--configure-webhook" "add/edit webhook with existing stack"]
-
    [nil "--create-instance" "create instance stack"]
    [nil "--delete-instance" "delete instance stack"]
    [nil "--status" "get description of instance state"]
    [nil "--start" "start instance"]
    [nil "--stop" "ensure instance is stopped"]
-   [nil "--ssh" "return ssh dst into instance. without elastic-ip configured, changes every start/stop cycle"]
-
+   [nil "--ssh" "starts instance and opens ssh session. args are passed to ssh"]
    ["-k" "--key-pair-name KEYPAIRNAME" "name of a SSH key registered with ec2"]
-   ; ["-v" "--verbose"]
-   ; ["-b" "--bucket BUCKETNAME" "name of bucket to use. If one is not provided one is created"]
-   ; ["-p" "--profile AWS_PROFILE" "Defers to environment. Once set will be stored and reused"]
-   ; ["-r" "--region AWS_REGION" "Defers to environment. Once set will be stored and reused"]
    ])
 
 (defn error-msg [errors]
@@ -133,9 +128,6 @@
        :opts options
        :exit-message (usage summary) :ok? true})))
 
-(defn resolve-region [opts]
-  (goog.object.get (.-env js/process) "AWS_REGION"))
-
 (defn dispatch-action [action opts]
   (case action
     ::create-webhook (wh/create-webhook-stack opts)
@@ -149,25 +141,38 @@
     ::ssh (instance/ssh-address)
     (to-chan! [[{:msg (str "umatched action: " (pr-str action))}]])))
 
-(defn -main [& args]
-  (let [{:keys [action opts exit-message ok?] :as arg} (validate-args args)
-        region (resolve-region opts)]
-    (cond
-      (nil? region)
-      (exit 1 "please run with AWS_REGION set")
-
-      (some? exit-message)
-      (exit (if ok? 0 1) exit-message)
-
-      (nil? action)
-      (exit 0 nil)
-
-      true
-      (go
-        (let [opts (assoc opts :region region)
-              [err ok :as res] (<! (dispatch-action action opts))]
+(defn resolve-config [_]
+  (let [ini (js/require "@aws-sdk/shared-ini-file-loader")
+        profile (goog.object.get (.-env js/process) "AWS_PROFILE" "default")]
+    (with-promise out
+      (take! (p->res (.loadSharedConfigFiles ini #js{:profile profile}))
+        ;; possible bug if profile not keyword safe
+        (fn [[err {{config (keyword profile)} :configFile} :as res]]
           (if err
-            (exit 1 err)
-            (exit 0 ok)))))))
+            (put! out res)
+            (put! out [nil (assoc config :profile profile)])))))))
+
+(defn -main [& args]
+  (let [{:keys [action opts exit-message ok?] :as arg} (validate-args args)]
+    (if (some? exit-message)
+      (exit (if ok? 0 1) exit-message)
+      (go
+       (let [[err {:keys [region] :as cfg} :as res] (<! (resolve-config opts))]
+         (cond
+           (some? err)
+           (exit 1 err)
+
+           (nil? region)
+           (exit 1 (str "please set the region field for profile " (:profile cfg) " in .aws/config"))
+
+           (nil? action)
+           (exit 0 nil)
+
+           true
+           (let [opts (assoc opts :region region)
+                 [err ok :as res] (<! (dispatch-action action opts))]
+             (if err
+               (exit 1 err)
+               (exit 0 ok)))))))))
 
 (set! *main-cli-fn* -main)

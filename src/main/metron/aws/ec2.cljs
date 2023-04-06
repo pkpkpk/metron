@@ -2,7 +2,7 @@
   (:require-macros [metron.macros :refer [with-promise edn-res-chan]])
   (:require [cljs.core.async :refer [promise-chan put! take!]]
             [metron.logging :as log]
-            [metron.util :refer [pipe1]]))
+            [metron.util :refer [pipe1 p->res]]))
 
 (def EC2 (js/require "@aws-sdk/client-ec2"))
 (def client (new (.-EC2Client EC2)))
@@ -68,12 +68,6 @@
 
 (defn stop-instance [iid]
   (send (new (.-StopInstancesCommand EC2) #js{:InstanceIds #js[iid]})))
-
-(defn p->res [p]
-  (with-promise out
-    (.then p
-          #(put! out (cond-> [nil] (some? %) (conj (cljs.core/js->clj % :keywordize-keys true))))
-          #(put! out [(cljs.core/js->clj % :keywordize-keys true)]))))
 
 (defn wait-for-running [iid]
   (p->res (.waitUntilInstanceRunning EC2

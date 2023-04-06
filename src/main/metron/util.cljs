@@ -7,9 +7,17 @@
 
 (defn pp [x] (with-out-str (pprint x)))
 
+(defn ->clj [o] (js->clj o :keywordize-keys true))
+
 (defn pipe1 [a b]
   (take! a (fn [v] (put! b v)))
   b)
+
+(defn p->res [p]
+  (with-promise out
+    (.then p
+           #(put! out (cond-> [nil] (some? %) (conj (->clj %))))
+           #(put! out [(->clj %)]))))
 
 (def readline (js/require "readline"))
 
@@ -26,9 +34,6 @@
 
 (defn random-string []
   (.toString (.randomBytes crypto 30) "hex"))
-
-(defn ->clj [o]
-  (js->clj o :keywordize-keys true))
 
 (defn file-timestamp []
   (-> (js/Date.)
