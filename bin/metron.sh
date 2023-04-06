@@ -3,19 +3,11 @@
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 ROOT_PATH=$(dirname $SCRIPT_DIR)
 
-node $ROOT_PATH/dist/metron_cli.js $@
-
-
-verbose=false
 ssh=false
 node_args=()
 while [[ $# -gt 0 ]]
 do
     case "$1" in
-        -v|--verbose)
-            verbose=true
-            shift
-            ;;
         --ssh)
             ssh=true
             shift
@@ -47,18 +39,10 @@ fi
 
 # Set up logging
 log_file="metron.log"
-exec 2> >(tee -a "$log_file" >&2)
 
-# Run Node.js script
-if [ "$verbose" = true ]
-then
-    node $ROOT_PATH/dist/metron_cli.js "${node_args[@]}" 2>&1
-else
-    node $ROOT_PATH/dist/metron_cli.js "${node_args[@]}" >/dev/null 2>&1
-fi
+node $ROOT_PATH/dist/metron_cli.js "${node_args[@]}" 2> >(tee -a "$log_file" >&2) | tee -a "$log_file"
 
-# Capture and log exit code
-exit_code=$?
+exit_code=${PIPESTATUS[0]}
 echo "Exit code: $exit_code" >> "$log_file"
 
 exit "$exit_code"

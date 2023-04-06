@@ -7,46 +7,40 @@
             [clojure.string :as string]
             [clojure.tools.cli :refer [parse-opts]]
             [metron.aws.ec2 :as ec2]
-            [metron.keypair :as kp]
-            [metron.webhook-stack :as wh]
             [metron.instance-stack :as instance]
+            [metron.keypair :as kp]
+            [metron.logging :as log]
+            [metron.webhook-stack :as wh]
             [metron.util :as util :refer [pp p->res]]))
 
 (nodejs/enable-util-print!)
 
-(defn exit [status data]
-  (let [msg (cond
-              (string? data)
-               data
-
-              (instance? js/Error data)
-              (str (.-name data) " : " (.-message data))
-
-              (:msg data)
-              (:msg data)
-
-               true
-               data)]
+(defn exit [status data] ;; TODO when err return file paths? right now nothing
+  (do
     (if (zero? status)
-      (when (some? msg)
-        (if (string? msg)
-          (.write (.-stdout js/process) msg)
-          (.write (.-stdout js/process) (pp msg))))
-      (let [s (str "metron_error_" (js/Date.now))]
-        (.write (.-stderr js/process) (str msg \newline))
-        (cond
-          (instance? js/Error data)
-          (let [f (cljs-node-io.file/createTempFile s ".tmp")]
-            (.write (.-stdout js/process) (str (.getPath f) \newline))
-            (io/spit f (str (.-stack data) \newline)))
-          (map? data)
-          (let [f (cljs-node-io.file/createTempFile s ".edn")]
-            (.write (.-stdout js/process) (str (.getPath f) \newline))
-            (io/spit f (pp data)))
-          true
-          (let [f (cljs-node-io.file/createTempFile s ".edn")]
-            (.write (.-stdout js/process) (str (.getPath f) \newline))
-            (io/spit f (pp {:msg data}))))))
+      (when (some? data)
+        (let [output (if (string? data)
+                        data
+                        (if-let [msg (and (map? data) (:msg data))]
+                          msg
+                          (pp msg)))])
+        (log/stdout output))
+      (if (instance? js/Error data)
+        (let [s (str "metron_error_" (js/Date.now))
+              f (cljs-node-io.file/createTempFile s ".tmp")]
+          (io/spit f (.-stack data))
+          (log/err (str (.-message data)))
+          (log/err (str "more info in " (.getPath f))))
+        (let [msg (if (string? data)
+                    data
+                    (if-let [msg (and (map? data) (:msg data))]
+                      msg
+                      (pp msg)))
+              s (str "metron_error_" (js/Date.now))
+              f (cljs-node-io.file/createTempFile s ".tmp")]
+          (io/spit f (pp data))
+          (log/err msg)
+          (log/err (str "more info in " (.getPath f))))))
     (.exit js/process status)))
 
 (defn usage [options-summary]
@@ -60,6 +54,9 @@
 (def cli-options
   [["-h" "--help"]
    ; ["-v" "--verbose"]
+
+   ; ["-l" "--log"]
+   ; [nil "--log-path"]
    [nil "--create-webhook" "create webhook stack"]
    [nil "--delete-webhook" "delete webhook stack"]
    [nil "--configure-webhook" "add/edit webhook with existing stack"]
@@ -68,9 +65,7 @@
    [nil "--status" "get description of instance state"]
    [nil "--start" "start instance"]
    [nil "--stop" "ensure instance is stopped"]
-   [nil "--ssh" "starts instance and opens ssh session. args are passed to ssh"]
-   ["-k" "--key-pair-name KEYPAIRNAME" "name of a SSH key registered with ec2"]
-   ])
+   [nil "--ssh" "starts instance and opens ssh session. args are passed to ssh"]])
 
 (defn error-msg [errors]
   (str "The following errors occurred while parsing your command:\n\n"
