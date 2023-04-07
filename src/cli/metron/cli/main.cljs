@@ -18,13 +18,11 @@
 (defn exit [status data] ;; TODO when err return file paths? right now nothing
   (do
     (if (zero? status)
-      (when (some? data)
+      (when data
         (let [output (if (string? data)
-                        data
-                        (if-let [msg (and (map? data) (:msg data))]
-                          msg
-                          (pp msg)))])
-        (log/stdout output))
+                       data
+                       (pp data))]
+          (log/stdout output)))
       (if (instance? js/Error data)
         (let [s (str "metron_error_" (js/Date.now))
               f (cljs-node-io.file/createTempFile s ".tmp")]
@@ -35,7 +33,7 @@
                     data
                     (if-let [msg (and (map? data) (:msg data))]
                       msg
-                      (pp msg)))
+                      (str "Unknown error type " (type data))))
               s (str "metron_error_" (js/Date.now))
               f (cljs-node-io.file/createTempFile s ".tmp")]
           (io/spit f (pp data))

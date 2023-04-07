@@ -67,6 +67,10 @@
                         (put! out res)
                         (pipe1 (get-stack-outputs) out)))))))))))))
 
+
+
+
+
 (defn ssh-address []
   (assert (some? (goog.object.get (.-env js/process) "METRON_KEY_PATH")))
   (with-promise out
@@ -77,6 +81,10 @@
           (let [key-path (goog.object.get (.-env js/process) "METRON_KEY_PATH")
                 address (str "ec2-user@" PublicDNS)]
             (put! out [nil (str key-path " " address)])))))))
+
+
+
+
 
 
 (defn wait-for-stopped
@@ -186,14 +194,14 @@
                                 :info ok}])))))))))))
 
 (defn create-instance-stack
-  [{:keys [key-pair-name] :as opts}]
+  [{?key-pair-name :key-pair-name :as opts}]
   (with-promise out
     (take! (bkt/ensure-bucket opts)
       (fn [[err Bucket :as res]]
         (if err
           (put! out res)
-          (take! (kp/validate-keypair key-pair-name)
-            (fn [[err ok :as res]]
+          (take! (kp/ensure ?key-pair-name)
+            (fn [[err key-pair-name :as res]]
               (if err
                 (put! out res)
                 (take! (stack/create (stack-params key-pair-name))
