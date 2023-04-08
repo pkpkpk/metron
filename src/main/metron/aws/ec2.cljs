@@ -115,7 +115,7 @@
         (if err
           (put! out res)
           (take! (do
-                   (println "Waiting for instance to stop " iid)
+                   (log/info "Waiting for instance to stop " iid)
                    (wait-for-stopped iid))
             (fn [[err ok :as res]]
               (if err

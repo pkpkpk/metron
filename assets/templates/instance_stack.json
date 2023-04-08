@@ -48,11 +48,11 @@
       "Description" : "Availability Zone of the newly created EC2 instance",
       "Value" : { "Fn::GetAtt" : [ "MetronInstance", "AvailabilityZone" ] }
     },
-    "PublicDNS" : {
+    "PublicDnsName" : {
       "Description" : "Public DNSName of the newly created EC2 instance",
       "Value" : { "Fn::GetAtt" : [ "MetronInstance", "PublicDnsName" ] }
     },
-    "PublicIP" : {
+    "PublicIpAddress" : {
       "Description" : "Public IP address of the newly created EC2 instance",
       "Value" : { "Fn::GetAtt" : [ "MetronInstance", "PublicIp" ] }
     }

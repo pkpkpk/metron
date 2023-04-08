@@ -17,7 +17,8 @@
 
 (.on js/process "uncaughtException"
      (fn [err origin]
-       (log/fatal (.-stack err))))
+       (log/fatal (.-stack err))
+       (set! (.-exitCode js/process) 99)))
 
 (defn exit [status data] ;; TODO when err return file paths? right now nothing
   (do
@@ -135,7 +136,7 @@
     ::status (instance/describe)
     ::start (instance/wait-for-ok)
     ::stop (instance/wait-for-stopped)
-    ::ssh (instance/ssh-address)
+    ::ssh (instance/ssh-args)
     (to-chan! [[{:msg (str "umatched action: " (pr-str action))}]])))
 
 (defn resolve-config [_]
@@ -153,23 +154,22 @@
   (let [{:keys [action opts exit-message ok?] :as arg} (validate-args args)]
     (if (some? exit-message)
       (exit (if ok? 0 1) exit-message)
-      (go
-       (let [[err {:keys [region] :as cfg} :as res] (<! (resolve-config opts))]
-         (cond
-           (some? err)
-           (exit 1 err)
+      (if (nil? action)
+        (exit 0 nil)
+        (go
+         (let [[err {:keys [region] :as cfg} :as res] (<! (resolve-config opts))]
+           (cond
+             (some? err)
+             (exit 1 err)
 
-           (nil? region)
-           (exit 1 (str "please set the region field for profile " (:profile cfg) " in .aws/config"))
+             (nil? region)
+             (exit 1 (str "please set the region field for profile " (:profile cfg) " in .aws/config"))
 
-           (nil? action)
-           (exit 0 nil)
-
-           true
-           (let [opts (assoc opts :region region)
-                 [err ok :as res] (<! (dispatch-action action opts))]
-             (if err
-               (exit 1 err)
-               (exit 0 ok)))))))))
+             true
+             (let [opts (assoc opts :region region)
+                   [err ok :as res] (<! (dispatch-action action opts))]
+               (if err
+                 (exit 1 err)
+                 (exit 0 ok))))))))))
 
 (set! *main-cli-fn* -main)

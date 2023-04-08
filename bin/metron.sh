@@ -28,10 +28,8 @@ then
     if [ $exit_code -eq 0 ]
     then
         key=$(echo "$ssh_args" | awk '{print $1}')
-        echo "key : $key"
         ip=$(echo "$ssh_args" | awk '{print $2}')
-        echo "ip : $ip"
-        ssh -i $key -t $ip
+        ssh -i $key $ip
         exit_code=$?
     fi
     exit "$exit_code"

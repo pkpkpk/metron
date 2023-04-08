@@ -14,7 +14,20 @@
 
 (def describe-stack (partial stack/describe-stack "metron-instance-stack"))
 
-(def get-stack-outputs (partial stack/get-stack-outputs "metron-instance-stack"))
+(defn ^{:doc "cf will give stale info for ip/dns, unclear if iid ever changes"}
+  get-stack-outputs []
+  (with-promise out
+    (take! (stack/get-stack-outputs "metron-instance-stack")
+      (fn [[err {InstanceId :InstanceId :as outputs} :as res]]
+        (if err
+          (put! out res)
+          (take! (ec2/describe-instance InstanceId)
+            (fn [[err {:keys [PublicDnsName PublicIpAddress]} :as res]]
+              (if err
+                (put! out res)
+                (put! out [nil (assoc outputs
+                                      :PublicDnsName PublicDnsName
+                                      :PublicIpAddress PublicIpAddress)])))))))))
 
 (defn instance-id []
   (with-promise out
@@ -67,25 +80,16 @@
                         (put! out res)
                         (pipe1 (get-stack-outputs) out)))))))))))))
 
-
-
-
-
-(defn ssh-address []
-  (assert (some? (goog.object.get (.-env js/process) "METRON_KEY_PATH")))
+(defn ssh-args []
   (with-promise out
     (take! (wait-for-ok)
-      (fn [[err {:keys [PublicDNS KeyName]} :as res]]
+      (fn [[err {:keys [PublicDnsName KeyName]} :as res]]
         (if err
           (put! out res)
-          (let [key-path (goog.object.get (.-env js/process) "METRON_KEY_PATH")
-                address (str "ec2-user@" PublicDNS)]
-            (put! out [nil (str key-path " " address)])))))))
-
-
-
-
-
+          (if-let [key-file (kp/?existing-file)]
+            (put! out [nil (str (.getPath key-file) " ec2-user@" PublicDnsName)])
+            ;;TODO cannot fix this w/o kp/ensure-associated
+            (put! out [{:msg "could not find key file"}])))))))
 
 (defn wait-for-stopped
   ([]
