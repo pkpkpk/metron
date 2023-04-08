@@ -132,4 +132,6 @@
                         (fn [[err ok :as res]]
                           (if err
                             (put! out res)
-                            (pipe1 (wait-for-ok iid) out)))))))))))))))
+                            (pipe1 (do
+                                     (println "waiting for instance ok" iid)
+                                     (wait-for-ok iid)) out)))))))))))))))

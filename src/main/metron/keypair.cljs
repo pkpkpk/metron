@@ -36,7 +36,7 @@
   (with-promise out
     (let [base (str key-name ".pem")
           file (io/file (.join path (.homedir os) ".ssh") base)]
-      (take! (io/aspit file key-material)
+      (take! (io/aspit file key-material :mode 0600)
         (fn [[dotssh-err :as res]]
           (if (nil? dotssh-err)
             (do
@@ -44,7 +44,7 @@
               (put! out [nil key-name]))
             (let [file (io/file (.homedir os) base)]
               (log/warn "failed writing key to " (.getPath file) ", trying " (.getPath file))
-              (take! (io/aspit file key-material)
+              (take! (io/aspit file key-material :mode 0600)
                 (fn [[home-err ok :as res]]
                   (if home-err
                     (do
@@ -60,22 +60,31 @@
     (create key-name nil))
   ([key-name target-file]
    (with-promise out
-     (log/info "creating key " key-name)
      (take! (ec2/create-key-pair key-name)
        (fn [[err {KeyMaterial :KeyMaterial} :as res]]
          (if err
-           (put! out res)
-           (if (nil? target-file)
-             (pipe1 (write-key key-name KeyMaterial) out)
-             (take! (io/aspit target-file KeyMaterial)
+           (if (string/ends-with? (.-message err) "keypair already exists")
+             (take! (do
+                      (log/info "overwriting previously registered key with name" key-name)
+                      (ec2/delete-key-pair key-name))
                (fn [[err ok :as res]]
                  (if err
                    (put! out res)
-                   (put! out [key-name])))))))))))
+                   (pipe1 (create key-name target-file) out))))
+             (put! out res))
+           (do
+             (log/info "creating new" key-name "key")
+             (if (nil? target-file)
+               (pipe1 (write-key key-name KeyMaterial) out)
+               (take! (io/aspit target-file KeyMaterial :mode 0600)
+                 (fn [[err ok :as res]]
+                   (if err
+                     (put! out res)
+                     (put! out [key-name]))))))))))))
 
 (defn delete [key-name]
   (with-promise out
-    (log/info "deleting key " key-name)
+    (log/info "deleting key" key-name)
     (take! (ec2/delete-key-pair key-name)
       (fn [[err :as res]]
         (if err
