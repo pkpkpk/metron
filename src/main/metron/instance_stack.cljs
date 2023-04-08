@@ -178,6 +178,7 @@
 (defn reboot-with-docker-service [iid]
   (with-promise out
     (let [user-data (io/slurp (util/asset-path "scripts" "post_install_userdata.sh"))]
+      (log/info "rebooting instance, this may take a few minutes")
       (take! (ec2/restart-with-userdata iid user-data)
         (fn [[err ok :as res]]
           (if err
@@ -193,14 +194,13 @@
                     (put! out [{:msg "error starting docker service using user-data"
                                 :info ok}])))))))))))
 
-(defn create-instance-stack
-  [{?key-pair-name :key-pair-name :as opts}]
+(defn create-instance-stack [{:as opts}]
   (with-promise out
     (take! (bkt/ensure-bucket opts)
       (fn [[err Bucket :as res]]
         (if err
           (put! out res)
-          (take! (kp/ensure ?key-pair-name)
+          (take! (kp/ensure-registered)
             (fn [[err key-pair-name :as res]]
               (if err
                 (put! out res)

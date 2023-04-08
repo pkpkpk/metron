@@ -13,10 +13,20 @@
 
 (defn describe-key-pairs
   "Describes the specified key pairs or all of your key pairs."
-  ([] (send (new (.-DescribeKeyPairsCommand EC2))))
+  ([] (send (new (.-DescribeKeyPairsCommand EC2) #js{})))
   ([& key-names]
    (send (new (.-DescribeKeyPairsCommand EC2) #js{:KeyNames (into-array key-names)
                                                   :IncludePublicKey true}))))
+
+(defn describe-key-pair
+  [key-name]
+  (with-promise out
+    (take! (send (new (.-DescribeKeyPairsCommand EC2) #js{:KeyNames #js[key-name]
+                                                          :IncludePublicKey true}))
+      (fn [[err {[k] :KeyPairs} :as res]]
+        (if err
+          (put! out res)
+          (put! out [nil k]))))))
 
 (defn delete-key-pair
   ([key-name]
@@ -31,6 +41,11 @@
   ([key-pair-name dry-run?]
    (send (new (.-CreateKeyPairCommand EC2) #js{:DryRun dry-run?
                                                :KeyName key-pair-name}))))
+
+(defn import-key-pair
+  [key-pair-name buf]
+  (send (new (.-ImportKeyPairCommand EC2) #js{:KeyName key-pair-name
+                                              :PublicKeyMaterial buf})))
 
 (defn describe-instances
   ([]
@@ -95,16 +110,26 @@
 (defn restart-with-userdata [iid user-data]
   (with-promise out
     (log/info "stopping instance " iid)
-    (take! (wait-for-stopped iid)
+    (take! (stop-instance iid)
       (fn [[err ok :as res]]
         (if err
           (put! out res)
           (take! (do
-                   (log/info "overwriting user-data for instance " iid)
-                   (set-user-data iid user-data))
+                   (println "Waiting for instance to stop " iid)
+                   (wait-for-stopped iid))
             (fn [[err ok :as res]]
               (if err
                 (put! out res)
-                (do
-                  (log/info "restarting instance " iid " this may take a few minutes.")
-                  (pipe1 (wait-for-ok iid) out))))))))))
+                (take! (do
+                        (log/info "overwriting user-data for instance " iid)
+                        (set-user-data iid user-data))
+                  (fn [[err ok :as res]]
+                    (if err
+                      (put! out res)
+                      (take! (do
+                               (log/info "restarting instance " iid)
+                               (start-instance iid))
+                        (fn [[err ok :as res]]
+                          (if err
+                            (put! out res)
+                            (pipe1 (wait-for-ok iid) out)))))))))))))))

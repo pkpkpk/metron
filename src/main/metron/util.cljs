@@ -51,12 +51,12 @@
 
 (def path (js/require "path"))
 
-(def ^:dynamic *asset-path* "assets")
+(def ^:dynamic *asset-path* (.join path (.getParent (io/file js/__dirname)) "assets"))
 
 (defn asset-path [& paths]
   (apply (.-join path) (into [*asset-path*] paths)))
 
-(def ^:dynamic *dist-path* "dist")
+(def ^:dynamic *dist-path* js/__dirname)
 
 (defn dist-path [& paths]
   (apply (.-join path) (into [*dist-path*] paths)))

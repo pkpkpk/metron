@@ -15,6 +15,10 @@
 
 (nodejs/enable-util-print!)
 
+(.on js/process "uncaughtException"
+     (fn [err origin]
+       (log/fatal (.-stack err))))
+
 (defn exit [status data] ;; TODO when err return file paths? right now nothing
   (do
     (if (zero? status)

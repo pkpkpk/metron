@@ -9,6 +9,16 @@
 
 (def path (js/require "path"))
 (def os (js/require "os"))
+(def crypto (js/require "crypto"))
+
+(defn fingerprint-pem [pem]
+  (let [pem (.trim pem)
+        rsa (.createPrivateKey crypto pem)
+        der (.export rsa #js{:format "der" :type "pkcs8"})
+        sha1 (-> (.createHash crypto "sha1")
+               (.update der)
+               (.digest "hex"))]
+    (string/join ":" (re-seq #".{1,2}" sha1))))
 
 (defn ?existing-file [key-pair-name]
   (let [base (str key-pair-name ".pem")
@@ -18,14 +28,6 @@
       (let [file (io/file (.homedir os) base)]
         (when (.exists file)
           file)))))
-
-(defn key-is-registered? [key-name]
-  (with-promise out
-    (take! (ec2/describe-key-pairs key-name)
-      (fn [[err ok]]
-        (if err
-          (put! out (not (string/includes? (.-message err) "does not exist")))
-          (put! out true))))))
 
 (defn- write-key [key-pair-name key-material] ;=> [?err key-pair-name]
   (with-promise out
@@ -50,16 +52,27 @@
                       (log/info "Success writing key to " (.getPath file))
                       (put! out [nil key-pair-name]))))))))))))
 
-(defn create [key-pair-name]
-  (with-promise out
-    (take! (ec2/create-key-pair key-pair-name)
-      (fn [[err {KeyMaterial :KeyMaterial} :as res]]
-        (if err
-          (put! out res)
-          (pipe1 (write-key key-pair-name KeyMaterial) out))))))
+(defn create
+  ([key-pair-name]
+    (create key-pair-name nil))
+  ([key-pair-name target-file]
+   (with-promise out
+     (log/info "creating key " key-pair-name)
+     (take! (ec2/create-key-pair key-pair-name)
+       (fn [[err {KeyMaterial :KeyMaterial} :as res]]
+         (if err
+           (put! out res)
+           (if (nil? target-file)
+             (pipe1 (write-key key-pair-name KeyMaterial) out)
+             (take! (io/aspit target-file KeyMaterial)
+               (fn [[err ok :as res]]
+                 (if err
+                   (put! out res)
+                   (put! out [key-pair-name])))))))))))
 
 (defn delete [key-pair-name]
   (with-promise out
+    (log/info "deleting key " key-pair-name)
     (take! (ec2/delete-key-pair key-pair-name)
       (fn [[err :as res]]
         (if err
@@ -68,47 +81,33 @@
             (some-> (?existing-file key-pair-name) (io/delete-file true))
             (put! out [nil])))))))
 
-;===============================================================================
+(defn ensure-existing-ok [pem-file key-name]
+  "tests if local pem matches registered key"
+  (with-promise out
+    (take! (ec2/describe-key-pair key-name)
+      (fn [[err {fp :KeyFingerprint} :as res]]
+        (if err
+          (if (string/ends-with? (.-message err) "does not exist")
+            (do
+              (log/warn "found existing metron.pem but not registered. overwriting")
+              (pipe1 (create key-name pem-file) out))
+            (put! out res))
+          (let [pem (io/slurp pem-file)]
+            (if (= fp (fingerprint-pem pem))
+              (put! out [nil key-name])
+              (do
+                (log/warn "found existing metron.pem but fingerprint does not match. overwriting")
+                (pipe1 (create key-name pem-file) out)))))))))
 
-(def ^:dynamic *key-pair-name* "metron")
+(defn ensure-registered []
+  (with-promise out
+    (log/info "checking metron.pem")
+    (if-let [file (?existing-file "metron")]
+      (pipe1 (ensure-existing-ok file "metron") out)
+      (pipe1 (create "metron") out))))
 
-(defn ensure
-  "If name is provided will treat as user provided, check-exists & registered.
-
-   Otherwise will try to create a default 'metron.pem' key if it doesnt already exist.
-   If local file exists but is not registered will try to overwrite.
-   If local file exists and name is registed, assumes ok"
-  ([]
-    (with-promise out
-      (log/info "checking metron.pem")
-      (if-let [file (?existing-file "metron")]
-        (take! (key-is-registered? "metron")
-          (fn [[err ok :as res]]
-            (if err
-              (put! out res)
-              (if (true? ok)
-                (put! out [nil "metron"])
-                (do
-                  (io/delete-file file true)
-                  (pipe1 (create "metron") out))))))
-        (pipe1 (create "metron") out))))
-  ([key-pair-name]
-   (if (nil? key-pair-name)
-     (ensure)
-     (with-promise out
-       (log/info "checking user provided key " key-pair-name)
-       (set! *key-pair-name* key-pair-name)
-       (if (nil? (?existing-file key-pair-name))
-         (put! out [{:msg (str "Could not find user specified key-file " key-pair-name ".pem in $home directory or $home/.ssh")}])
-         (take! (key-is-registered? key-pair-name)
-           (fn [[err ok :as res]]
-             (if err
-               (put! out res)
-               (if (true? ok)
-                 (put! out [nil key-pair-name])
-                 (put! out [{:msg "found key-file but key is not registered with ec2"}]))))))))))
-
-
+; TODO if a key is deleted want to associate new one with existing instance
+; (defn ensure-associated [key-pair-name iid])
 
 
 
