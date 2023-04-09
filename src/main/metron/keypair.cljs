@@ -4,6 +4,7 @@
             [clojure.string :as string]
             [cljs-node-io.core :as io]
             [metron.aws.ec2 :as ec2]
+            [metron.aws.ssm :as ssm]
             [metron.logging :as log]
             [metron.util :refer [pipe1 pp]]))
 
@@ -41,7 +42,7 @@
           (if (nil? dotssh-err)
             (do
               (log/info "Success writing key to " (.getPath file))
-              (put! out [nil key-name]))
+              (put! out [nil]))
             (let [file (io/file (.homedir os) base)]
               (log/warn "failed writing key to " (.getPath file) ", trying " (.getPath file))
               (take! (io/aspit file key-material :mode 0600)
@@ -53,7 +54,7 @@
                                   :cause [dotssh-err home-err]}]))
                     (do
                       (log/info "Success writing key to " (.getPath file))
-                      (put! out [nil key-name]))))))))))))
+                      (put! out [nil]))))))))))))
 
 (defn create
   ([key-name]
@@ -61,7 +62,7 @@
   ([key-name target-file]
    (with-promise out
      (take! (ec2/create-key-pair key-name)
-       (fn [[err {KeyMaterial :KeyMaterial} :as res]]
+       (fn [[err {KeyMaterial :KeyMaterial :as key-desc} :as res]]
          (if err
            (if (string/ends-with? (.-message err) "keypair already exists")
              (take! (do
@@ -74,13 +75,13 @@
              (put! out res))
            (do
              (log/info "creating new" key-name "key")
-             (if (nil? target-file)
-               (pipe1 (write-key key-name KeyMaterial) out)
-               (take! (io/aspit target-file KeyMaterial :mode 0600)
+             (take! (if (nil? target-file)
+                      (write-key key-name KeyMaterial)
+                      (io/aspit target-file KeyMaterial :mode 0600))
                  (fn [[err ok :as res]]
                    (if err
                      (put! out res)
-                     (put! out [key-name]))))))))))))
+                     (put! out [nil key-desc])))))))))))
 
 (defn delete [key-name]
   (with-promise out
@@ -93,34 +94,91 @@
             (some-> (?existing-file key-name) (io/delete-file true))
             (put! out [nil])))))))
 
-(defn ensure-existing-ok [pem-file key-name]
-  "tests if local pem matches registered key"
+(defn- check-existing-key [pem-file key-name]
   (with-promise out
     (take! (ec2/describe-key-pair key-name)
-      (fn [[err {fp :KeyFingerprint} :as res]]
+      (fn [[err {fp :KeyFingerprint :as key-desc} :as res]]
         (if err
           (if (string/ends-with? (.-message err) "does not exist")
-            (do
-              (log/warn "found existing metron.pem but not registered. overwriting")
-              (pipe1 (create key-name pem-file) out))
-            (put! out res))
+            (put! out [{:msg "existing key is not registered"
+                        :type :not-registered
+                        :cause err}])
+            (put! out [{:msg "unknown error"
+                        :cause err}]))
           (if (= fp (fingerprint-pem (io/slurp pem-file)))
-            (put! out [nil key-name])
-            (do
-              (log/warn "found existing metron.pem but fingerprint does not match. overwriting")
-              (take! (ec2/delete-key-pair key-name)
-                (fn [[err ok :as res]]
-                  (if err
-                    (put! out res)
-                    (pipe1 (create key-name pem-file) out)))))))))))
+            (put! out [nil key-desc])
+            (put! out [{:msg "fingerprints do not match"
+                        :type :bad-fingerprint
+                        :old-key key-desc}])))))))
 
-(defn ensure-registered []
+(defn- handle-key-error [pem-file err]
+  (with-promise out
+    (case (:type err)
+      :not-registered
+      (do
+        (log/warn "found existing metron.pem but not registered. overwriting")
+        (pipe1 (create "metron" pem-file) out))
+
+      :bad-fingerprint
+      (do
+        (log/warn "found existing metron.pem but fingerprint does not match. overwriting")
+        (take! (ec2/delete-key-pair "metron")
+          (fn [[err ok :as res]]
+            (if err
+              (put! out res)
+              (pipe1 (create "metron" pem-file) out)))))
+      (put! out [err]))))
+
+(defn- overwrite-authorized-keys [iid]
+  (with-promise out
+    (take! (ec2/describe-key-pair "metron")
+      (fn [[err {:keys [PublicKey]} :as res]]
+        (if err
+          (put! out res)
+          (let [cmd (str "echo \"" PublicKey "\" > .ssh/authorized_keys")]
+            (log/info "adding new key to instance")
+            (pipe1 (ssm/run-script iid cmd) out)))))))
+
+#!==============================================================================
+
+(defn ensure-registered "make sure we have a key-pair for ssh" []
   (with-promise out
     (log/info "checking metron.pem")
     (if-let [file (?existing-file "metron")]
-      (pipe1 (ensure-existing-ok file "metron") out)
+      (take! (check-existing-key file "metron")
+             (fn [[err ok :as res]]
+               (if (nil? err)
+                 (put! out res)
+                 (pipe1 (handle-key-error file err) out))))
       (pipe1 (create "metron") out))))
 
-; TODO if a key is deleted want to associate new one with existing instance
-; (defn ensure-associated [key-name iid])
+(defn ensure-authorized "make sure we have a key that works with instance" [iid]
+  (with-promise out
+    (log/info "checking that metron.pem matches instance")
+    (if-let [file (?existing-file "metron")]
+      (take! (check-existing-key file "metron")
+        (fn [[err ok :as res]]
+          (if (nil? err)
+            (do
+              (log/info "existing key ok!")
+              (put! out [nil (.getPath file)]))
+            (take! (handle-key-error file err)
+              (fn [[err key-desc :as res]]
+                (if err
+                  (put! out res)
+                  (take! (overwrite-authorized-keys iid)
+                    (fn [[err :as res]]
+                      (if err
+                        (put! out res)
+                        (put! out [nil (.getPath file)]))))))))))
+      (take! (create "metron")
+        (fn [[err :as res]]
+          (if err
+            (put! out res)
+            (let [key-path (.getPath (?existing-file "metron"))]
+              (take! (overwrite-authorized-keys iid)
+                (fn [[err :as res]]
+                  (if err
+                    (put! out res)
+                    (put! out [nil key-path])))))))))))
 

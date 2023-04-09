@@ -83,13 +83,14 @@
 (defn ssh-args []
   (with-promise out
     (take! (wait-for-ok)
-      (fn [[err {:keys [PublicDnsName KeyName]} :as res]]
+      (fn [[err {:keys [PublicDnsName InstanceId]} :as res]]
         (if err
           (put! out res)
-          (if-let [key-file (kp/?existing-file)]
-            (put! out [nil (str (.getPath key-file) " ec2-user@" PublicDnsName)])
-            ;;TODO cannot fix this w/o kp/ensure-associated
-            (put! out [{:msg "could not find key file"}])))))))
+          (take! (kp/ensure-authorized InstanceId)
+            (fn [[err key-path :as res]]
+              (if err
+                (put! out res)
+                (put! out [nil (str key-path " ec2-user@" PublicDnsName)])))))))))
 
 (defn wait-for-stopped
   ([]
@@ -205,10 +206,10 @@
         (if err
           (put! out res)
           (take! (kp/ensure-registered)
-            (fn [[err key-pair-name :as res]]
+            (fn [[err {KeyName :KeyName} :as res]]
               (if err
                 (put! out res)
-                (take! (stack/create (stack-params key-pair-name))
+                (take! (stack/create (stack-params KeyName))
                   (fn [[err {InstanceId :InstanceId :as outputs} :as res]]
                     (if err
                       (put! out res)

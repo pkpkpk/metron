@@ -29,6 +29,7 @@ then
     then
         key=$(echo "$ssh_args" | awk '{print $1}')
         ip=$(echo "$ssh_args" | awk '{print $2}')
+        echo "starting ssh session with $ip"
         ssh -i $key $ip
         exit_code=$?
     fi
