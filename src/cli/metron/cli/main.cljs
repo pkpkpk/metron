@@ -10,6 +10,7 @@
             [metron.instance-stack :as instance]
             [metron.keypair :as kp]
             [metron.logging :as log]
+            [metron.remote :as remote]
             [metron.webhook-stack :as wh]
             [metron.util :as util :refer [pp p->res]]))
 
@@ -20,6 +21,7 @@
        (log/fatal (.-stack err))
        (set! (.-exitCode js/process) 99)))
 
+;;TODO flag to skip file output
 (defn exit [status data] ;; TODO when err return file paths? right now nothing
   (do
     (if (zero? status)
@@ -46,7 +48,10 @@
           (log/err (str "more info in " (.getPath f))))))
     (.exit js/process status)))
 
-(defn usage [options-summary]
+(def actions #{:create-webhook :delete-webhook :create-instance :delete-instance
+               :push :status :start :stop :configure-webhook})
+
+(defn usage [options-summary] ;; TODO distinguish actions and their args
   (->> ["Usage: node metron.js [options]*"
         ""
         "Options:"
@@ -56,10 +61,8 @@
 
 (def cli-options
   [["-h" "--help"]
-   ; ["-v" "--verbose"]
-
-   ; ["-l" "--log"]
-   ; [nil "--log-path"]
+   ;; cpu etc
+   [nil "--push" "send latest commit from cwd to instance and run it"]
    [nil "--create-webhook" "create webhook stack"]
    [nil "--delete-webhook" "delete webhook stack"]
    [nil "--configure-webhook" "add/edit webhook with existing stack"]
@@ -72,10 +75,12 @@
 
 (defn error-msg [errors]
   (str "The following errors occurred while parsing your command:\n\n"
-       (string/join \newline errors)))
+       (string/join \newline errors)
+       \newline))
 
 (defn validate-args [args]
-  (let [{:keys [options arguments errors summary] :as opts} (parse-opts args cli-options)]
+  (let [{:keys [options arguments errors summary] :as opts} (parse-opts args cli-options)
+        [action :as actions] (reduce #(if (contains? options %2) (conj %1 %2) %1) [] actions)]
     (cond
       (:help options) ; help => exit OK with usage summary
       {:exit-message (usage summary)
@@ -85,58 +90,33 @@
       {:exit-message (error-msg errors)
        :ok? false}
 
-      (:create-webhook options)
-      {:action ::create-webhook
-       :opts (dissoc options :create-webhook)}
+      (< 1 (count actions))
+      (let [msg [(str "Only one action can be specified at a time, found " (count actions))
+                 actions]]
+        {:exit-message (error-msg msg)
+         :ok? false})
 
-      (:delete-webhook options)
-      {:action ::delete-webhook
-       :opts (dissoc options :delete-webhook)}
-
-      (:status options)
-      {:action ::status
-       :opts (dissoc options :status)}
-
-      (:start options)
-      {:action ::start
-       :opts (dissoc options :start)}
-
-      (:stop options)
-      {:action ::stop
-       :opts (dissoc options :stop)}
-
-      (:configure-webhook options)
-      {:action ::configure-webhook
-       :opts (dissoc options :configure-webhook)}
-
-      (:create-instance options)
-      {:action ::create-instance
-       :opts (dissoc options :create-instance)}
-
-      (:delete-instance options)
-      {:action ::delete-instance
-       :opts (dissoc options :delete-instance)}
-
-      (:ssh options)
-      {:action ::ssh
-       :opts (dissoc options :ssh)}
+      (nil? action)
+      {:action :help
+       :opts options
+       :exit-message (usage summary) :ok? true}
 
       true
-      {:action ::help
-       :opts options
-       :exit-message (usage summary) :ok? true})))
+      {:action action
+       :opts (dissoc options action)})))
 
 (defn dispatch-action [action opts]
   (case action
-    ::create-webhook (wh/create-webhook-stack opts)
-    ::delete-webhook (wh/delete-webhook-stack)
-    ::configure-webhook (wh/configure-webhook)
-    ::create-instance (instance/ensure-ok opts)
-    ::delete-instance (instance/delete-instance-stack)
-    ::status (instance/describe)
-    ::start (instance/wait-for-ok)
-    ::stop (instance/wait-for-stopped)
-    ::ssh (instance/ssh-args)
+    :create-webhook (wh/create-webhook-stack opts)
+    :delete-webhook (wh/delete-webhook-stack)
+    :configure-webhook (wh/configure-webhook)
+    :create-instance (instance/ensure-ok opts)
+    :delete-instance (instance/delete-instance-stack)
+    :status (instance/describe)
+    :start (instance/wait-for-ok)
+    :stop (instance/wait-for-stopped)
+    :ssh (instance/ssh-args)
+    :push (remote/push opts)
     (to-chan! [[{:msg (str "umatched action: " (pr-str action))}]])))
 
 (defn resolve-config [_]

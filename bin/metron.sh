@@ -36,7 +36,6 @@ then
     exit "$exit_code"
 fi
 
-# Set up logging
 log_file="metron.log"
 
 node $ROOT_PATH/dist/metron_cli.js "${node_args[@]}" 2> >(tee -a "$log_file" >&2) | tee -a "$log_file"
