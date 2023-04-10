@@ -17,15 +17,11 @@ region=$2
 echo "Starting metron server installion at $(date)" >> metron_install.log
 
 echo "Copying files from bucket to ~/bin" >> metron_install.log
-aws s3 cp s3://$bucket_name/metron_webhook_handler.js ./bin/metron_webhook_handler.js --region $region >> metron_install.log
-aws s3 cp s3://$bucket_name/metron_remote_handler.js ./bin/metron_remote_handler.js --region $region >> metron_install.log
-aws s3 cp s3://$bucket_name/config.edn ./bin/config.edn --region $region >> metron_install.log
-aws s3 cp s3://$bucket_name/metron-remote.sh ./bin/metron-remote --region $region >> metron_install.log
-aws s3 cp s3://$bucket_name/metron-webhook.sh ./bin/metron-webhook --region $region >> metron_install.log
+aws s3 sync s3://$bucket_name/bin ./bin --region $region >> metron_install.log
 echo "Finished copying files from bucket" >> metron_install.log
 
-chmod +x bin/metron-webhook
-chmod +x bin/metron-remote
+echo "Setting execute permissions on .sh files" >> metron_install.log
+chmod +x ./bin/*.sh >> metron_install.log
 
 echo "Creating aws config file" >> metron_install.log
 mkdir -p .aws

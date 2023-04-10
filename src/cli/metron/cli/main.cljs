@@ -21,8 +21,16 @@
        (log/fatal (.-stack err))
        (set! (.-exitCode js/process) 99)))
 
-;;TODO flag to skip file output
-(defn exit [status data] ;; TODO when err return file paths? right now nothing
+(defn ssm-response-err-msg [m]
+  (and (map? m)
+       (contains? m :DocumentName)
+       (str "Error running script on instance:" \newline
+            (get m :StandardErrorContent))))
+
+;; TODO flag to skip file output
+;; TODO when err return file paths? right now nothing
+;; JSON
+(defn exit [status data]
   (do
     (if (zero? status)
       (when data
@@ -36,20 +44,21 @@
           (io/spit f (.-stack data))
           (log/err (str (.-message data)))
           (log/err (str "more info in " (.getPath f))))
-        (let [msg (if (string? data)
-                    data
-                    (if-let [msg (and (map? data) (:msg data))]
-                      msg
-                      (str "Unknown error type " (type data))))
+        (let [[msg edn?] (if (string? data)
+                           [data false]
+                           (if-let [msg (or (and (map? data) (:msg data))
+                                            (ssm-response-err-msg data))]
+                             [msg true]
+                             [(str "Unknown error type " (type data)) false]))
               s (str "metron_error_" (js/Date.now))
-              f (cljs-node-io.file/createTempFile s ".tmp")]
+              f (cljs-node-io.file/createTempFile s (if edn? ".edn" ".tmp"))]
           (io/spit f (pp data))
           (log/err msg)
           (log/err (str "more info in " (.getPath f))))))
     (.exit js/process status)))
 
 (def actions #{:create-webhook :delete-webhook :create-instance :delete-instance
-               :push :status :start :stop :configure-webhook})
+               :push :status :start :stop :configure-webhook :ssh})
 
 (defn usage [options-summary] ;; TODO distinguish actions and their args
   (->> ["Usage: node metron.js [options]*"

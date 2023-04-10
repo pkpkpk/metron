@@ -117,24 +117,28 @@
 
 (defn upload-file
   ([src-path]
-   (upload-file src-path (.getName (io/file src-path))))
-  ([src-path dst-path]
+   (upload-file src-path nil))
+  ([src-path folder]
    (with-promise out
      (take! (io/aslurp src-path)
        (fn [[err ok :as res]]
          (if err
            (put! out res)
-           (pipe1 (put-object dst-path ok) out)))))))
+           (let [dst-path (cond->> (.getName (io/file src-path))
+                            folder (str folder "/"))]
+             (pipe1 (put-object dst-path ok) out))))))))
 
-(defn upload-files [files]
-  (with-promise out
-    (go-loop [files files]
-      (if-let [file (first files)]
-        (let [[err ok :as res] (<! (upload-file file))]
-          (if (some? err)
-            (put! out res)
-            (recur (rest files))))
-        (put! out [nil])))))
+(defn upload-files
+  ([files] (upload-files files nil))
+  ([files folder]
+   (with-promise out
+     (go-loop [files files]
+       (if-let [file (first files)]
+         (let [[err ok :as res] (<! (upload-file file folder))]
+           (if (some? err)
+             (put! out res)
+             (recur (rest files))))
+         (put! out [nil]))))))
 
 (defn wait-for-object [key]
   (with-promise out

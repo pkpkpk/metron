@@ -63,6 +63,7 @@
            (pipe1 (wait-for-ok InstanceId) out))))))
   ([iid]
    (with-promise out
+     (log/info "checking instance state...")
      (take! (instance-state)
         (fn [[err ok :as res]]
           (if err
@@ -132,24 +133,34 @@
 
 (defn stack-params [key-pair-name]
   {:StackName "metron-instance-stack"
-   :DisableRollback true
+   :DisableRollback true ;;TODO
    :Capabilities #js["CAPABILITY_IAM" "CAPABILITY_NAMED_IAM"]
    :TemplateBody (io/slurp (util/asset-path "templates" "instance_stack.json"))
    :Parameters [#js{"ParameterKey" "KeyName"
                     "ParameterValue" key-pair-name}]})
 
-(defn upload-files-to-bucket [{:keys [Bucket region] :as opts}] ;;TODO zip archive?
+;; TODO upload-file(s)
+;;TODO zip archive?
+
+(defn bin-files []
+  (let [parent (io/file (util/asset-path "scripts" "bin"))
+        bin-scripts (map #(.getPath %) (.listFiles parent))]
+    (into [(util/dist-path "metron_webhook_handler.js")
+           (util/dist-path "metron_remote_handler.js")]
+          bin-scripts)))
+
+(defn upload-files-to-bucket [{:keys [Bucket region] :as opts}]
   (with-promise out
-    (take! (bkt/upload-files [(util/dist-path "metron_webhook_handler.js")
-                              (util/dist-path "metron_remote_handler.js")
-                              (util/asset-path "scripts" "metron-remote.sh")
-                              (util/asset-path "scripts" "metron-webhook.sh")
-                              (util/asset-path "scripts" "install.sh")])
+    (take! (bkt/upload-file (util/asset-path "scripts" "install.sh"))
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (let [config (pr-str {:region region :Bucket Bucket})]
-            (pipe1 (bkt/put-object "config.edn" config) out)))))))
+          (take! (bkt/upload-files (bin-files) "bin")
+            (fn [[err ok :as res]]
+              (if err
+                (put! out res)
+                (let [config (pr-str {:region region :Bucket Bucket})]
+                  (pipe1 (bkt/put-object "bin/config.edn" config) out))))))))))
 
 (defn install [{:keys [Bucket region InstanceId] :as opts}]
   (assert (some? Bucket))
@@ -168,6 +179,7 @@
                 (put! out res)
                 (let [cmd (str "chmod +x ./install.sh && ./install.sh " Bucket " " region)]
                   (log/info "Installing handlers on instance " InstanceId)
+                  ;;TODO if err download install.log
                   (pipe1 (ssm/run-script InstanceId cmd) out))))))))))
 
 (defn docker-service-running? [iid]
