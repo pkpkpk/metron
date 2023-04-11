@@ -8,6 +8,7 @@
             [metron.bucket :as bkt]
             [metron.git :as g]
             [metron.instance-stack :as instance]
+            [metron.keypair :as kp]
             [metron.logging :as log]
             [metron.util :as util :refer [pp pipe1 asset-path]]))
 
@@ -22,11 +23,10 @@
                       :stderr stderr}])
           (put! out [nil {:stdout stdout :stderr stderr}]))))))
 
+(defn current-branch [] (proc/exec "git rev-parse --abbrev-ref HEAD" {:encoding "utf8"}))
+
 (defn ensure-remote-repo [iid repo-name]
   (ssm/run-script iid (str "sudo -u ec2-user ./bin/create_repo.sh " repo-name)))
-
-; (defn set-remote-url [url]
-;   (aexec (str "git remote remove metron; git remote add metron "url" || true")))
 
 (defn metron-remote-url [PublicDnsName repo-path]
   (assert (.isAbsolute (io/file repo-path)) (str "remote repo-path " repo-path " is not absolute"))
@@ -35,13 +35,13 @@
 (defn git-prefix [key-path]
   (str "GIT_SSH_COMMAND=\"ssh -i " key-path "\""))
 
-(defn git-push [url]
-  (let [current-branch ":$(git rev-parse --abbrev-ref HEAD)"
-        cmd (str (git-prefix "~/.ssh/metron.pem") " git push " url " " "metron")] ;;TODO retrieve current-branch
-    (aexec cmd)))
+(defn git-push [key-path url branch]
+  (log/info "Pushing " branch " to instance")
+  (aexec (str (git-prefix key-path) " git push " url " " branch)))
 
-(defn ensure-worktree [iid repo-name]
-  (ssm/run-script iid (str "./bin/convert_bare.sh " repo-name)))
+(defn sync-bare-to-non-bare [iid repo-name branch]
+  (log/info "syncing remote bare repo to usable worktree")
+  (ssm/run-script iid (str "sudo -u ec2-user ./bin/sync_bare_to_non_bare.sh " repo-name " " branch)))
 
 (defn ?validate-cwd []
   (log/info "Validating" (.cwd js/process))
@@ -61,10 +61,18 @@
         (fn [[err {:keys [StandardOutputContent StandardErrorContent] :as ok} :as res]]
           (if err
             (put! out res)
-            (let [_(log/info StandardErrorContent)
-                  instance-repo-path (string/trim-newline StandardOutputContent)
-                  remote-url (metron-remote-url PublicDnsName instance-repo-path)]
-              (pipe1 (git-push remote-url) out))))))))
+            (let [_(log/info (string/trim-newline StandardErrorContent))
+                  key-path (.getPath (kp/?existing-file))
+                  bare-repo-path (string/trim-newline StandardOutputContent)
+                  remote-url (metron-remote-url PublicDnsName bare-repo-path)
+                  branch (current-branch)]
+              (take! (git-push key-path remote-url branch)
+                (fn [[err ok :as res]]
+                  (if err
+                    (put! out res)
+                    (take! (sync-bare-to-non-bare InstanceId repo-name branch)
+                      (fn [[err ok :as res]]
+                        (put! out res)))))))))))))
 
 (defn push [opts]
   (with-promise out

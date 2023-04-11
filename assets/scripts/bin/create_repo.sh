@@ -11,7 +11,7 @@ mkdir -p $REPOS_DIR
 # Check if the repository or bare repository exists
 if [ -d "$REPO_PATH" ]; then
   echo "found existing repo with normal worktree" >&2
-  echo "$(realpath $REPO_PATH)"
+  echo "$(realpath $BARE_REPO_PATH)"
 elif [ -d "$BARE_REPO_PATH" ]; then
   echo "found existing bare repo" >&2
   echo "$(realpath $BARE_REPO_PATH)"
