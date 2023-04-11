@@ -13,6 +13,9 @@ fi
 bucket_name=$1
 region=$2
 
+rm -f metron_install.log
+sudo -u ec2-user touch metron_install.log
+
 # Log the start of the script to the file
 echo "Starting metron server installion at $(date)" >> metron_install.log
 
@@ -21,11 +24,12 @@ aws s3 sync s3://$bucket_name/bin ./bin --region $region >> metron_install.log
 echo "Finished copying files from bucket" >> metron_install.log
 
 echo "Setting execute permissions on .sh files" >> metron_install.log
-chmod +x ./bin/*.sh >> metron_install.log
+chmod a+rwx ./bin/*.sh >> metron_install.log
 
 echo "Creating aws config file" >> metron_install.log
-mkdir -p .aws
+sudo -u ec2-user mkdir -p .aws
 echo "[default]\nregion = $region" >> .aws/config
+chmod a+r .aws/config
 
 echo "Installing node s3 client" >> metron_install.log
 npm install @aws-sdk/client-s3 >> metron_install.log

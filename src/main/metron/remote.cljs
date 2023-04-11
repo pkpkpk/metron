@@ -23,22 +23,21 @@
           (put! out [nil {:stdout stdout :stderr stderr}]))))))
 
 (defn ensure-remote-repo [iid repo-name]
-  (ssm/run-script iid (str "./bin/create_repo.sh " repo-name)))
+  (ssm/run-script iid (str "sudo -u ec2-user ./bin/create_repo.sh " repo-name)))
 
 ; (defn set-remote-url [url]
 ;   (aexec (str "git remote remove metron; git remote add metron "url" || true")))
 
 (defn metron-remote-url [PublicDnsName repo-path]
   (assert (.isAbsolute (io/file repo-path)) (str "remote repo-path " repo-path " is not absolute"))
-  (str "ssh://ec2-user@" PublicDnsName ":" repo-path #_".git"))
+  (str "ssh://ec2-user@" PublicDnsName ":" repo-path))
 
 (defn git-prefix [key-path]
   (str "GIT_SSH_COMMAND=\"ssh -i " key-path "\""))
 
 (defn git-push [url]
   (let [current-branch ":$(git rev-parse --abbrev-ref HEAD)"
-        cmd (str (git-prefix "~/.ssh/metron.pem") " git push " url " " current-branch)]
-    ; (aexec "git push metron :$(git rev-parse --abbrev-ref HEAD)")
+        cmd (str (git-prefix "~/.ssh/metron.pem") " git push " url " " "metron")] ;;TODO retrieve current-branch
     (aexec cmd)))
 
 (defn ensure-worktree [iid repo-name]
@@ -59,12 +58,13 @@
     (let [cwd (io/file (.cwd js/process))
           repo-name (.getName cwd)]
       (take! (ensure-remote-repo InstanceId repo-name)
-        (fn [[err {:keys [StandardOutputContent] :as ok} :as res]]
+        (fn [[err {:keys [StandardOutputContent StandardErrorContent] :as ok} :as res]]
           (if err
             (put! out res)
-            (let [instance-repo-path (string/trim-newline StandardOutputContent)
+            (let [_(log/info StandardErrorContent)
+                  instance-repo-path (string/trim-newline StandardOutputContent)
                   remote-url (metron-remote-url PublicDnsName instance-repo-path)]
-              (put! out [nil instance-repo-path]))))))))
+              (pipe1 (git-push remote-url) out))))))))
 
 (defn push [opts]
   (with-promise out

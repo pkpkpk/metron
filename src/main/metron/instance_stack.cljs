@@ -171,7 +171,7 @@
       (fn [[err ok :as res]]
         (if err
           (put! out res)
-          (take! (let [cmd (str "aws s3 cp s3://" Bucket "/install.sh install.sh")]
+          (take! (let [cmd (str "sudo -u ec2-user aws s3 cp s3://" Bucket "/install.sh install.sh")]
                    (log/info "Downloading files from " Bucket " to " InstanceId)
                    (ssm/run-script InstanceId cmd))
             (fn [[err ok :as res]]
