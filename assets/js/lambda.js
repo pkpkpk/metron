@@ -57,6 +57,7 @@ exports.handler = async(event, _ctx) => {
       if (shouldShutdownInstance){ cmds.push('shutdown -h now') };
       const sendCommandParams = {
         DocumentName: 'AWS-RunShellScript',
+        Username: "ec2-user",
         Parameters: {workingDirectory: ["/home/ec2-user"],commands: cmds},
         Targets: [{Key: 'InstanceIds', Values: [instanceId]}]
       };

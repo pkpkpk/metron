@@ -13,9 +13,11 @@
 (defn describe-instance-info []
   (send (new (.-DescribeInstanceInformationCommand SSM) #js{})))
 
+;;TODO root option
 (defn send-script-cmd [instance cmd]
   (send (new (.-SendCommandCommand SSM) #js{:DocumentName "AWS-RunShellScript"
                                             :InstanceIds #js[instance]
+                                            :Username "ec2-user"
                                             :Parameters #js{:commands (if (string? cmd)
                                                                         #js[cmd]
                                                                         (into-array cmd))
