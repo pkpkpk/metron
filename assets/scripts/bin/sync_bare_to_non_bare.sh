@@ -17,7 +17,7 @@ fi
 
 # Check if the non-bare repository exists, and create it if it doesn't
 if [ ! -d "${REPOS_DIR}/${NON_BARE_REPO_NAME}" ]; then
-  echo "Creating non-bare repository..."
+  echo "Creating non-bare repository..." >&2
   cd "${REPOS_DIR}"
   git_output=$(sudo -u ec2-user git clone "${BARE_REPO_NAME}" "${NON_BARE_REPO_NAME}" 2>&1)
   exit_code=$?

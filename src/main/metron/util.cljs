@@ -9,9 +9,7 @@
 
 (defn ->clj [o] (js->clj o :keywordize-keys true))
 
-(defn pipe1 [a b]
-  (take! a (fn [v] (put! b v)))
-  b)
+(defn pipe1 [a b] (take! a (fn [v] (put! b v))) b)
 
 (defn p->res [p]
   (with-promise out

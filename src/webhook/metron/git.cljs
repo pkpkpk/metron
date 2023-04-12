@@ -3,8 +3,7 @@
   (:require [cljs.core.async :refer [go go-loop promise-chan put! take!]]
             [clojure.string :as string]
             [cljs-node-io.core :as io]
-            [cljs-node-io.proc :as proc]
-            [metron.util :refer [pipe1] :as util]))
+            [cljs-node-io.proc :as proc]))
 
 (def path (js/require "path"))
 
@@ -45,7 +44,7 @@
     (take! (checkout-metron-branch event)
       (fn [[err :as res]]
         (if (nil? err)
-          (pipe1 (pull-metron-branch event) out)
+          (take! (pull-metron-branch event) #(put! out %))
           (if-not (string/includes? (.-message err) "did not match any file(s) known to git")
             (put! out res)
             (take! (create-metron-branch event)

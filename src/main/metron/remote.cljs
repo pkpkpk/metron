@@ -102,7 +102,8 @@
                 (if err
                   (put! out res)
                   (let [non-bare-path (string/trim-newline StandardOutputContent)
-                        _(assert (string/starts-with? non-bare-path "/home/ec2-user"))
+                        _(assert (string/starts-with? non-bare-path "/home/ec2-user")
+                                 (str "expected path in home, got:'"non-bare-path"'"))
                         tag (short-sha)]
                     (take! (docker-build InstanceId non-bare-path tag)
                       (fn [[err ok :as res]]

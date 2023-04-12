@@ -4,7 +4,6 @@
             [cljs.nodejs :as nodejs]
             [cljs-node-io.core :as io]
             [cljs-node-io.proc :as proc]
-            [cljs.pprint :refer [pprint]]
             [cljs.reader :refer [read-string]]
             [clojure.string :as string]
             [goog.object]

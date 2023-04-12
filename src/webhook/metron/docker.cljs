@@ -4,8 +4,7 @@
             [clojure.string :as string]
             [cljs-node-io.core :as io]
             [cljs-node-io.proc :as proc]
-            [metron.logging :as log]
-            [metron.util :refer [pipe1] :as util]))
+            [metron.logging :as log]))
 
 (def path (js/require "path"))
 
@@ -40,4 +39,4 @@
         (fn [[err ok :as res]]
           (if err
             (put! out res)
-            (pipe1 (run event) out)))))))
+            (take! (run event) #(put! out %))))))))
