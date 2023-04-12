@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Usage: ./get_latest_changes.sh <repo_name> <branch_name> <short_sha>
+# Usage: ./sync_bare_to_non_bare.sh <repo_name> <branch_name> <short_sha>
 
 REPO_NAME=$1
 BRANCH=$2
@@ -51,6 +51,7 @@ fi
 CURRENT_SHA=$(git rev-parse --short HEAD 2>&1)
 if [ "${CURRENT_SHA}" = "${SHORT_SHA}" ]; then
   echo "Success: Repository is up to date" >&2
+  echo "$(realpath .)"
   exit 0
 else
   echo "Error: Repository is not up to date" >&2

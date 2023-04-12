@@ -25,7 +25,8 @@
 
 (defn current-branch [] (proc/exec "git rev-parse --abbrev-ref HEAD" {:encoding "utf8"}))
 
-(defn short-sha [] (proc/exec "git rev-parse --short HEAD" {:encoding "utf8"}))
+(defn short-sha []
+  (string/trim-newline (proc/exec "git rev-parse --short HEAD" {:encoding "utf8"})))
 
 (defn ensure-bare-repo [iid repo-name]
   (log/info "Ensuring bare-repo exists on instance" iid)
@@ -79,6 +80,14 @@
                       (fn [[err ok :as res]]
                         (put! out res)))))))))))))
 
+(defn docker-build [iid non-bare-path tag]
+  (let [cmd (str "sudo -u ec2-user docker build -t " tag " ." )]
+    (ssm/run-script iid cmd {:cwd non-bare-path})))
+
+(defn docker-run [iid non-bare-path tag]
+  (let [cmd (str "sudo -u ec2-user docker run " tag)]
+    (ssm/run-script iid cmd {:cwd non-bare-path})))
+
 (defn push [opts]
   (with-promise out
     (take! (instance/wait-for-ok)
@@ -87,4 +96,19 @@
           (put! out res)
           (if-let [errors (?validate-cwd)]
             (put! out [{:errors errors :msg "Invalid local repository"}]) ;;TODO this doesnt report well
-            (pipe1 (sync-repos outputs) out)))))))
+            (take! (sync-repos outputs)
+              (fn [[err {:keys [StandardOutputContent]} :as res]]
+                (if err
+                  (put! out res)
+                  (let [non-bare-path (string/trim-newline StandardOutputContent)
+                        _(assert (string/starts-with? non-bare-path "/home/ec2-user"))
+                        tag (short-sha)]
+                    (take! (docker-build InstanceId non-bare-path tag)
+                      (fn [[err ok :as res]]
+                        (if err
+                          (put! out res)
+                          (take! (docker-run InstanceId non-bare-path tag)
+                            (fn [[err {:keys [StandardOutputContent]} :as res]]
+                              (if err
+                                (put! out res)
+                                (put! out [nil StandardOutputContent])))))))))))))))))
