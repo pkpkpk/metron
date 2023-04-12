@@ -86,6 +86,7 @@
 
 (defn docker-run [iid non-bare-path tag]
   (let [cmd (str "sudo -u ec2-user docker run " tag)]
+    (log/info "running container...")
     (ssm/run-script iid cmd {:cwd non-bare-path})))
 
 (defn push [opts]
@@ -108,7 +109,10 @@
                         (if err
                           (put! out res)
                           (take! (docker-run InstanceId non-bare-path tag)
-                            (fn [[err {:keys [StandardOutputContent]} :as res]]
+                            (fn [[err {:keys [StandardOutputContent StandardErrorContent]} :as res]]
                               (if err
                                 (put! out res)
-                                (put! out [nil StandardOutputContent])))))))))))))))))
+                                (let [stderr-lines (string/split-lines StandardErrorContent)]
+                                  (doseq [line stderr-lines]
+                                    (log/stderr line))
+                                  (put! out [nil StandardOutputContent]))))))))))))))))))

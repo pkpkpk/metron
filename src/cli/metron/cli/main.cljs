@@ -70,7 +70,7 @@
 
 (def cli-options
   [["-h" "--help"]
-   ;; cpu etc
+   ["-q" "--quiet" "elide info logging from output to stderr"]
    [nil "--push" "send latest commit from cwd to instance and run it"]
    [nil "--create-webhook" "create webhook stack"]
    [nil "--delete-webhook" "delete webhook stack"]
@@ -147,6 +147,8 @@
         (exit 0 nil)
         (go
          (let [[err {:keys [region] :as cfg} :as res] (<! (resolve-config opts))]
+           (when (:quiet opts)
+             (set! metron.logging/*quiet?* true))
            (cond
              (some? err)
              (exit 1 err)

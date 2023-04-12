@@ -18,12 +18,16 @@
   ([instance cmd]
    (send-script-cmd instance cmd nil))
   ([instance cmd {cwd :cwd :or {cwd "/home/ec2-user"}}]
-   (let [opts #js{:DocumentName "AWS-RunShellScript"
+   (let [cmds (if (string? cmd)
+                #js[cmd]
+                (into-array cmd))
+         opts #js{:DocumentName "AWS-RunShellScript"
                   :InstanceIds #js[instance]
-                  :Parameters #js{:commands (if (string? cmd)
-                                              #js[cmd]
-                                              (into-array cmd))
+                  :Parameters #js{:commands cmds
                                   :workingDirectory #js[cwd]}}]
+     (when-let [bad-cmds (not-empty (reduce (fn [acc s](if (.test #"\n" s) (conj acc s) acc)) [] cmds))]
+       (doseq [bad-cmd bad-cmds]
+         (log/warn "Found newline in AWS-RunShellScript cmd:" (pr-str bad-cmd))))
      (send (new (.-SendCommandCommand SSM) opts)))))
 
 (defn get-command-invocation [iid cid]

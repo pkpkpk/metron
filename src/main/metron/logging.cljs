@@ -35,17 +35,20 @@
 
 ;; TODO configure human/json/edn
 
-(defn err [& args]
-  (assert (fn? *log*))
-  (*log* (str "["(timestamp)"] ERROR: " (format-args args) \newline)))
+(def ^:dynamic *quiet?* false)
 
 (defn info [& args]
-  (assert (fn? *log*))
-  (*log* (str "["(timestamp)"] INFO: " (format-args args) \newline)))
+  (when-not *quiet?*
+    (assert (fn? *log*))
+    (*log* (str "["(timestamp)"] INFO: " (format-args args) \newline))))
 
 (defn warn [& args]
   (assert (fn? *log*))
   (*log* (str "["(timestamp)"] WARN: " (format-args args) \newline)))
+
+(defn err [& args]
+  (assert (fn? *log*))
+  (*log* (str "["(timestamp)"] ERROR: " (format-args args) \newline)))
 
 (defn fatal [& args]
   (assert (fn? *log*))
