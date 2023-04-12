@@ -20,6 +20,16 @@
                            ":" (pad-number seconds))]
     timestamp-str))
 
+(defn file-timestamp []
+  (-> (js/Date.)
+      (.toISOString)
+      (string/replace #":" "-")
+      (string/replace #"\.\d{3}" "")))
+
+(defn parse-file-timestamp [timestamp-str]
+  (let [[year, month, day, hours, minutes, seconds] (.split timestamp-str #"[-T:Z]")]
+    (new js/Date year (dec month) day hours minutes seconds)))
+
 (defn format-arg [arg] (if (string? arg) arg (pr-str arg)))
 
 (defn format-args [args]

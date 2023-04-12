@@ -27,9 +27,6 @@
        (str "Error running script on instance:" \newline
             (get m :StandardErrorContent))))
 
-;; TODO flag to skip file output
-;; TODO when err return file paths? right now nothing
-;; JSON
 (defn exit [status data]
   (do
     (if (zero? status)
@@ -58,7 +55,8 @@
     (.exit js/process status)))
 
 (def actions #{:create-webhook :delete-webhook :create-instance :delete-instance
-               :push :status :start :stop :configure-webhook :ssh})
+               :push :status :start :stop :configure-webhook :ssh :delete
+               :describe-instance})
 
 (defn usage [options-summary] ;; TODO distinguish actions and their args
   (->> ["Usage: node metron.js [options]*"
@@ -76,7 +74,8 @@
    [nil "--delete-webhook" "delete webhook stack"]
    [nil "--configure-webhook" "add/edit webhook with existing stack"]
    [nil "--create-instance" "create instance stack"]
-   [nil "--delete-instance" "delete instance stack"]
+   [nil "--delete-instance" "delete both instance and webhook stack. bucket is ignored"]
+   [nil "--delete" "delete both instance and webhook stack. bucket is ignored"]
    [nil "--status" "get description of instance state"]
    [nil "--start" "start instance"]
    [nil "--stop" "ensure instance is stopped"]
@@ -114,13 +113,30 @@
       {:action action
        :opts (dissoc options action)})))
 
+(defn delete-stacks []
+  (with-promise out
+    (take! (wh/delete-webhook-stack)
+      (fn [[err :as res]]
+        (if err
+          (put! out res)
+          (take! (instance/delete-instance-stack)
+            (fn [[err :as res]]
+              (if err
+                (put! out res)
+                (put! out [nil])))))))))
+
+(defn status [])
+
 (defn dispatch-action [action opts]
   (case action
     :create-webhook (wh/create-webhook-stack opts)
     :delete-webhook (wh/delete-webhook-stack)
     :configure-webhook (wh/configure-webhook)
     :create-instance (instance/ensure-ok opts)
-    :delete-instance (instance/delete-instance-stack)
+    :delete-instance (delete-stacks)
+    :describe-instance (instance/describe)
+    :delete (delete-stacks)
+    ; :delete-all bucket too?
     :status (instance/describe)
     :start (instance/wait-for-ok)
     :stop (instance/wait-for-stopped)

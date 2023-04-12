@@ -133,5 +133,5 @@
                           (if err
                             (put! out res)
                             (pipe1 (do
-                                     (println "waiting for instance ok" iid)
+                                     (log/info "waiting for instance ok" iid)
                                      (wait-for-ok iid)) out)))))))))))))))

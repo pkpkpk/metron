@@ -63,7 +63,6 @@
            (pipe1 (wait-for-ok InstanceId) out))))))
   ([iid]
    (with-promise out
-     (log/info "checking instance state...")
      (take! (instance-state)
         (fn [[err ok :as res]]
           (if err
@@ -138,9 +137,6 @@
    :TemplateBody (io/slurp (util/asset-path "templates" "instance_stack.json"))
    :Parameters [#js{"ParameterKey" "KeyName"
                     "ParameterValue" key-pair-name}]})
-
-;; TODO upload-file(s)
-;;TODO zip archive?
 
 (defn bin-files []
   (let [parent (io/file (util/asset-path "scripts" "bin"))
@@ -236,7 +232,13 @@
                                   (put! out res)
                                   (put! out [nil outputs]))))))))))))))))))
 
-(defn delete-instance-stack [] (stack/delete "metron-instance-stack"))
+(defn delete-instance-stack []
+  (with-promise out
+    (take! (stack/delete "metron-instance-stack")
+      (fn [[err :as res]]
+        (if err
+          (put! out res)
+          (put! out [nil]))))))
 
 (defn ensure-ok
   "if instance-stack does not exist, create it.
@@ -246,7 +248,7 @@
   [opts]
   (with-promise out
     (take! (wait-for-ok)
-      (fn [[err iid :as res]]
+      (fn [[err {iid :InstanceId :as outputs} :as res]]
         (if err
           (if (= "Stack with id metron-instance-stack does not exist" (.-message err))
             (pipe1 (create-instance-stack opts) out)
@@ -254,12 +256,12 @@
           (take! (docker-service-running? iid)
             (fn [[err running? :as res]]
               (if running?
-                (pipe1 (get-stack-outputs) out)
+                (put! out [nil outputs])
                 (do
                   (log/warn "docker service not running! webhook stacks will not work. check user data")
                   (take! (start-docker iid)
                     (fn [[err ok :as res]]
                       (if err
                         (put! out res)
-                        (pipe1 (get-stack-outputs) out)))))))))))))
+                        (put! out [nil outputs])))))))))))))
 

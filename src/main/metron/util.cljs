@@ -19,32 +19,10 @@
            #(put! out (cond-> [nil] (some? %) (conj (->clj %))))
            #(put! out [(->clj %)]))))
 
-(def readline (js/require "readline"))
-
-(defn get-acknowledgment []
-  (with-promise out
-    (let [rl (.createInterface readline #js{:input (.-stdin js/process) :output (.-stdout js/process)})]
-      (.question rl "hit any key to continue"
-        (fn [answer]
-          (.close rl)
-          (close! out))))))
-
-
 (def crypto (js/require "crypto"))
 
 (defn random-string []
   (.toString (.randomBytes crypto 30) "hex"))
-
-(defn file-timestamp []
-  (-> (js/Date.)
-      (.toISOString)
-      (string/replace #":" "-")
-      (string/replace #"\.\d{3}" "")))
-
-(defn parse-file-timestamp [timestamp-str]
-  (let [[year, month, day, hours, minutes, seconds] (.split timestamp-str #"[-T:Z]")]
-    (new js/Date year (dec month) day hours minutes seconds)))
-
 
 #!==============================================================================
 ;; cli only

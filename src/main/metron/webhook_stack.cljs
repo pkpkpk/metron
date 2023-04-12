@@ -18,7 +18,7 @@
 
 (defn generate-deploy-key [iid]
   (with-promise out
-    (let [script (io/slurp "assets/scripts/keygen.sh")]
+    (let [script (io/slurp (util/asset-path "scripts" "keygen.sh"))]
       (take! (ssm/run-script iid script)
         (fn [[err ok :as res]]
           (if err
@@ -46,11 +46,21 @@
   (println deploy-key)
   (print "===========================================================================\n"))
 
+(def readline (js/require "readline"))
+
+(defn get-acknowledgment []
+  (with-promise out
+    (let [rl (.createInterface readline #js{:input (.-stdin js/process) :output (.-stdout js/process)})]
+      (.question rl "hit any key to continue"
+        (fn [answer]
+          (.close rl)
+          (close! out))))))
+
 (defn prompt-deploy-key-to-user [iid deploy-key]
   (with-promise out
     (go-loop []
       (deploy-key-prompt deploy-key)
-      (<! (util/get-acknowledgment))
+      (<! (get-acknowledgment))
       (println "verifying deploy key...")
       (let [[err ok] (<! (verify-deploy-key iid))]
         (if (nil? err)
@@ -104,7 +114,7 @@
   (with-promise out
     (go-loop []
       (webhook-secret-prompt opts)
-      (<! (util/get-acknowledgment))
+      (<! (get-acknowledgment))
       (println "waiting for ping result ...")
       (let [[err ok :as res] (<! (wait-for-pong))]
         (if (nil? err)
@@ -134,7 +144,7 @@
     (go-loop []
       (<! (bkt/delete-result))
       (push-event-prompt opts)
-      (<! (util/get-acknowledgment))
+      (<! (get-acknowledgment))
       (println "waiting for result ...")
       (let [[err ok :as res] (<! (bkt/wait-for-result))]
         (if (nil? err)
@@ -159,6 +169,7 @@
    (assert (string? WebhookUrl))
    (assert (not (string/blank? WebhookUrl)))
    (with-promise out
+    (log/info "Starting webhook configuration...")
     (take! (configure-deploy-key opts)
       (fn [[err ok :as res]]
         (if err
@@ -196,7 +207,7 @@
   ([iid]
     (let [cmd ["mkdir events"
                "echo \"{\\\"headers\\\":{\\\"x-github-event\\\":\\\"ping\\\"}}\" > events/test_ping.json"
-               "./bin/metron-webhook events/test_ping.json"]]
+               "./bin/metron-webhook.sh events/test_ping.json"]]
       (ssm/run-script iid cmd))))
 
 (defn test-ping
@@ -236,6 +247,7 @@
 (defn- check-instance
   [{:keys [key-pair-name] :as opts}]
   (with-promise out
+    (log/info "checking instance state before creating webhook")
     (take! (bkt/ensure-bucket opts)
       (fn [[err bucket-name :as res]]
         (if err
@@ -289,4 +301,10 @@
                     (log/info "Existing instance is ok, creating webhook stack")
                     (pipe1 (create-new-stack InstanceId) out)))))))))))
 
-(defn delete-webhook-stack [] (stack/delete "metron-webhook-stack"))
+(defn delete-webhook-stack []
+  (with-promise out
+    (take! (stack/delete "metron-webhook-stack")
+      (fn [[err :as res]]
+        (if err
+          (put! out res)
+          (put! out [nil]))))))
