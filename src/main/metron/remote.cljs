@@ -25,8 +25,11 @@
 
 (defn current-branch [] (proc/exec "git rev-parse --abbrev-ref HEAD" {:encoding "utf8"}))
 
-(defn ensure-remote-repo [iid repo-name]
-  (ssm/run-script iid (str "sudo -u ec2-user ./bin/create_repo.sh " repo-name)))
+(defn short-sha [] (proc/exec "git rev-parse --short HEAD" {:encoding "utf8"}))
+
+(defn ensure-bare-repo [iid repo-name]
+  (log/info "Ensuring bare-repo exists on instance" iid)
+  (ssm/run-script iid (str "sudo -u ec2-user ./bin/ensure_bare_repo.sh " repo-name)))
 
 (defn metron-remote-url [PublicDnsName repo-path]
   (assert (.isAbsolute (io/file repo-path)) (str "remote repo-path " repo-path " is not absolute"))
@@ -36,12 +39,13 @@
   (str "GIT_SSH_COMMAND=\"ssh -i " key-path "\""))
 
 (defn git-push [key-path url branch]
-  (log/info "Pushing " branch " to instance")
+  (log/info "Pushing branch" branch "to instance")
   (aexec (str (git-prefix key-path) " git push " url " " branch)))
 
-(defn sync-bare-to-non-bare [iid repo-name branch]
+(defn sync-bare-to-non-bare [iid repo-name branch short-sha]
   (log/info "syncing remote bare repo to usable worktree")
-  (ssm/run-script iid (str "sudo -u ec2-user ./bin/sync_bare_to_non_bare.sh " repo-name " " branch)))
+  (let [cmd (str "sudo -u ec2-user ./bin/sync_bare_to_non_bare.sh " repo-name " " branch " " short-sha)]
+    (ssm/run-script iid cmd)))
 
 (defn ?validate-cwd []
   (log/info "Validating" (.cwd js/process))
@@ -57,20 +61,21 @@
   (with-promise out
     (let [cwd (io/file (.cwd js/process))
           repo-name (.getName cwd)]
-      (take! (ensure-remote-repo InstanceId repo-name)
+      (take! (ensure-bare-repo InstanceId repo-name)
         (fn [[err {:keys [StandardOutputContent StandardErrorContent] :as ok} :as res]]
           (if err
             (put! out res)
-            (let [_(log/info (string/trim-newline StandardErrorContent))
+            (let [;_(log/info "<ec2-user ensure_bare_repo.sh>:" (string/trim-newline StandardErrorContent))
                   key-path (.getPath (kp/?existing-file))
                   bare-repo-path (string/trim-newline StandardOutputContent)
                   remote-url (metron-remote-url PublicDnsName bare-repo-path)
-                  branch (current-branch)]
+                  branch (string/trim-newline (current-branch))
+                  short-sha (short-sha)]
               (take! (git-push key-path remote-url branch)
                 (fn [[err ok :as res]]
                   (if err
                     (put! out res)
-                    (take! (sync-bare-to-non-bare InstanceId repo-name branch)
+                    (take! (sync-bare-to-non-bare InstanceId repo-name branch short-sha)
                       (fn [[err ok :as res]]
                         (put! out res)))))))))))))
 
@@ -80,6 +85,6 @@
       (fn [[err {:keys [InstanceId PublicDnsName] :as outputs} :as res]]
         (if err
           (put! out res)
-          (if-let [err (?validate-cwd)]
-            (put! out [err])
+          (if-let [errors (?validate-cwd)]
+            (put! out [{:errors errors :msg "Invalid local repository"}]) ;;TODO this doesnt report well
             (pipe1 (sync-repos outputs) out)))))))
