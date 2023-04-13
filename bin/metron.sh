@@ -3,24 +3,34 @@
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 ROOT_PATH=$(dirname $SCRIPT_DIR)
 
+case "$(uname -s)" in
+    Linux*) LOG_DIR="$HOME/.local/share/metron" ;;
+    Darwin*) LOG_DIR="$HOME/Library/Logs/Metron" ;;
+    *) LOG_DIR="$HOME/.log/metron" ;;
+esac
+
+LOG_FILE="$LOG_DIR/metron.log"
+
 ssh=false
 node_args=()
 while [[ $# -gt 0 ]]
 do
     case "$1" in
+        --log)
+            echo "$LOG_FILE"
+            exit 0
+            ;;
         --ssh)
             ssh=true
             shift
             ;;
         *)
-            # Pass all arguments to Node.js script
             node_args+=("$1")
             shift
             ;;
     esac
 done
 
-# Connect with SSH if requested
 if [ "$ssh" = true ]
 then
     ssh_args=$(node $ROOT_PATH/dist/metron_cli.js --ssh)
@@ -36,11 +46,18 @@ then
     exit "$exit_code"
 fi
 
-log_file="metron.log"
+mv -f "$LOG_FILE.2" "$LOG_FILE.3" 2>/dev/null
+mv -f "$LOG_FILE.1" "$LOG_FILE.2" 2>/dev/null
+mv -f "$LOG_FILE" "$LOG_FILE.1" 2>/dev/null
 
-node $ROOT_PATH/dist/metron_cli.js "${node_args[@]}" 2> >(tee -a "$log_file" >&2) | tee -a "$log_file"
+mkdir -p "$LOG_DIR"
+touch "$LOG_FILE"
+
+echo "Calling metron_cli.js with args: $node_args" >> "$LOG_FILE"
+
+node $ROOT_PATH/dist/metron_cli.js "${node_args[@]}" 2> >(tee -a "$LOG_FILE" >&2) | tee -a "$LOG_FILE"
 
 exit_code=${PIPESTATUS[0]}
-echo "Exit code: $exit_code" >> "$log_file"
+echo "Exit code: $exit_code" >> "$LOG_FILE"
 
 exit "$exit_code"
