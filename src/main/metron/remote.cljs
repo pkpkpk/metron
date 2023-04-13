@@ -10,7 +10,7 @@
             [metron.instance-stack :as instance]
             [metron.keypair :as kp]
             [metron.logging :as log]
-            [metron.util :as util :refer [pp pipe1 asset-path]]))
+            [metron.util :refer [asset-path pipe1]]))
 
 (defn aexec [cmd]
   (with-promise out
@@ -113,7 +113,6 @@
                             (fn [[err {:keys [StandardOutputContent StandardErrorContent]} :as res]]
                               (if err
                                 (put! out res)
-                                (let [stderr-lines (string/split-lines StandardErrorContent)]
-                                  (doseq [line stderr-lines]
-                                    (log/stderr line))
+                                (do
+                                  (run! log/stderr (string/split-lines StandardErrorContent))
                                   (put! out [nil StandardOutputContent]))))))))))))))))))

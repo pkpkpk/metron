@@ -10,7 +10,6 @@
             [metron.git :as g]
             [metron.docker :as d]
             [metron.logging :as log]
-            [metron.util :as util :refer [->clj]]
             ["path"]))
 
 (nodejs/enable-util-print!)
@@ -20,6 +19,8 @@
        (log/fatal origin)
        (log/fatal (.-stack err))
        (set! (.-exitCode js/process) 99)))
+
+(defn ->clj [o] (js->clj o :keywordize-keys true))
 
 (def put-edn
   (let [S3 (js/require "@aws-sdk/client-s3")

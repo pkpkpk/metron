@@ -3,16 +3,13 @@
   (:require [cljs.core.async :refer [go >! <! to-chan! put! take!]]
             [cljs.nodejs :as nodejs]
             [cljs-node-io.core :as io]
-            [cljs.pprint :refer [pprint]]
             [clojure.string :as string]
             [clojure.tools.cli :refer [parse-opts]]
-            [metron.aws.ec2 :as ec2]
             [metron.instance-stack :as instance]
-            [metron.keypair :as kp]
             [metron.logging :as log]
             [metron.remote :as remote]
             [metron.webhook-stack :as wh]
-            [metron.util :as util :refer [pp p->res]]))
+            [metron.util :refer [pp p->res]]))
 
 (nodejs/enable-util-print!)
 
