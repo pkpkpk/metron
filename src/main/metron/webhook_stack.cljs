@@ -264,7 +264,7 @@
 
 (defn- create-new-stack [InstanceId]
   (with-promise out
-    (let [WebhookSecret (util/random-string)]
+    (let [WebhookSecret (.toString (.randomBytes (js/require "crypto") 30) "hex")]
       (take! (stack/create (stack-params InstanceId WebhookSecret))
         (fn [[err outputs :as res]]
           (if err

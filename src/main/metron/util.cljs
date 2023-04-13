@@ -17,11 +17,6 @@
            #(put! out (cond-> [nil] (some? %) (conj (->clj %))))
            #(put! out [(->clj %)]))))
 
-(def crypto (js/require "crypto"))
-
-(defn random-string []
-  (.toString (.randomBytes crypto 30) "hex"))
-
 #!==============================================================================
 ;; cli only
 
