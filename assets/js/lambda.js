@@ -51,14 +51,13 @@ exports.handler = async(event, _ctx) => {
       const sessionId = startSessionData.SessionId;
       const timestamp = (new Date()).toISOString().replace(/:/g, '-').replace(/\.\d{3}/, '');
       const fileName =  timestamp + '_' + event.body.repository.name + '_' + event_type + '.json';
-      var cmds = ["mkdir events",
-                  `echo '${JSON.stringify(event)}' > events/'${fileName}'`,
-                  `./bin/metron_webhook.sh events/'${fileName}'`];
-      if (shouldShutdownInstance){ cmds.push('shutdown -h now') };
+      var prep_cmd = `mkdir events && echo '${JSON.stringify(event)}' > events/'${fileName}'`;
+      var base_cmd = prep_cmd + " && " + `./bin/webhook.sh events/'${fileName}'`;
+      var cmd = shouldShutdownInstance ? base_cmd + " true" : base_cmd;
       const sendCommandParams = {
         DocumentName: 'AWS-RunShellScript',
-        Username: "ec2-user",
-        Parameters: {workingDirectory: ["/home/ec2-user"],commands: cmds},
+        Parameters: {workingDirectory: ["/home/ec2-user"],
+                     commands: [cmd]},
         Targets: [{Key: 'InstanceIds', Values: [instanceId]}]
       };
       const sendCommandCommand = new SendCommandCommand(sendCommandParams);
