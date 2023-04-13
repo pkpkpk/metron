@@ -9,18 +9,22 @@
 (def path (js/require "path"))
 
 (defn local-dir-path [{:keys [full_name]}]
-  (.join path "metron_repos" full_name))
+  (.join path "webhook_repos" full_name))
 
 (defn aexec [event cmd]
   (with-promise out
-    (take! (proc/aexec cmd {:encoding "utf8" :cwd (local-dir-path event)})
-      (fn [[err stdout stderr]]
-        (if err
-          (put! out [{:err (.-stack err)
-                      :msg (.-message err)
-                      :stdout stdout
-                      :stderr stderr}])
-          (put! out [nil {:stdout stdout :stderr stderr}]))))))
+    (let [cp (proc/aexec cmd {:encoding "utf8" :cwd (local-dir-path event)})]
+      (take! cp
+        (fn [[err stdout stderr]]
+          (if err
+            (put! out [{:err (.-stack err)
+                        :exit-code (.-exitCode cp)
+                        :msg (.-message err)
+                        :stdout stdout
+                        :stderr stderr}])
+            (put! out [nil {:stdout stdout
+                            :stderr stderr
+                            :exit-code (.-exitCode cp)}])))))))
 
 (defn build [{:keys [after] :as event}]
   (log/info "building container... " after)

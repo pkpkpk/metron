@@ -141,9 +141,7 @@
 (defn bin-files []
   (let [parent (io/file (util/asset-path "scripts" "bin"))
         bin-scripts (map #(.getPath %) (.listFiles parent))]
-    (into [(util/dist-path "metron_webhook_handler.js")
-           (util/dist-path "metron_remote_handler.js")]
-          bin-scripts)))
+    (conj bin-scripts (util/dist-path "metron_webhook_handler.js"))))
 
 (defn upload-files-to-bucket [{:keys [Bucket region] :as opts}]
   (with-promise out

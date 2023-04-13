@@ -1,6 +1,6 @@
 (ns metron.webhook-handler
   (:require-macros [metron.macros :refer [with-promise edn-res-chan]])
-  (:require [cljs.core.async :refer [promise-chan put! take!]]
+  (:require [cljs.core.async :refer [promise-chan put! take! go <!]]
             [cljs.nodejs :as nodejs]
             [cljs-node-io.core :as io]
             [cljs-node-io.proc :as proc]
@@ -16,23 +16,36 @@
 
 (.on js/process "uncaughtException"
      (fn [err origin]
+       (log/stderr origin)
+       (log/stderr (.-stack err))
        (log/fatal origin)
        (log/fatal (.-stack err))
        (set! (.-exitCode js/process) 99)))
 
 (defn ->clj [o] (js->clj o :keywordize-keys true))
 
-(def put-edn
-  (let [S3 (js/require "@aws-sdk/client-s3")
-        {:keys [Bucket region]} (read-string (io/slurp (.join path js/__dirname "config.edn")))
-        client (new (.-S3Client S3) #js{:region region})
-        send (fn [cmd] (edn-res-chan (.send client cmd)))]
-    (fn [key val]
-      (send (new (.-PutObjectCommand S3)
-                 #js{:Bucket Bucket
-                     :Key key
-                     :ContentType "application/edn"
-                     :Body (if (string? val) val (pr-str val))})))))
+(def S3 (js/require "@aws-sdk/client-s3"))
+(def config (read-string (io/slurp (.join path js/__dirname "config.edn"))))
+(def Bucket (:Bucket config))
+(def region (:region config))
+(def client (new (.-S3Client S3) #js{:region region}))
+(defn send [cmd] (edn-res-chan (.send client cmd)))
+
+(defn put-edn [key val]
+  (send (new (.-PutObjectCommand S3)
+          #js{:Bucket Bucket
+              :Key key
+              :ContentType "application/edn"
+              :Body (if (string? val) val (pr-str val))})))
+
+(defn put-object [key val]
+  (send (new (.-PutObjectCommand S3)
+          #js{:Bucket Bucket
+              :Key key
+              :ContentType "text/plain"
+              :Body (str val)})))
+
+
 
 (defn parse-event [json]
   (let [repo (some-> (.. json -body) (.. -repository) ->clj)
@@ -48,6 +61,7 @@
                  :master_branch
                  :default_branch
                  :pushed_at]]
+    (log/info "processing" (:full_name repo) " commit " (get head_commit :id))
     (assoc (select-keys repo repo-ks)
            :before (some-> (.. json -body) (.. -before))
            :after (some-> (.. json -body) (.. -after))
@@ -65,13 +79,21 @@
        (log/err output)))
    (js/process.exit code)))
 
-(defn report-results [[err ok :as res]]
-  (take! (put-edn "result.edn" res)
-    (fn [[s3-err]]
-      (when s3-err (log/warn s3-err))
-      (if err
-        (exit 1 res)
-        (exit 0 res)))))
+(def ^dynamic *raw-event-string*)
+
+(defn report-results [{:keys [full_name] :as event} [err ok :as res]]
+  (let [result-dir (str "webhook_results/" full_name "/" (g/short-sha event))
+        {:keys [stdout stderr]} (or err ok)]
+    (go
+     (<! (put-edn (str result-dir "/result.edn") res))
+     (<! (put-edn (str result-dir "/event.json") *raw-event-string*))
+     (when stdout
+       (<! (put-object (str result-dir "/stdout") stdout)))
+     (when stderr
+       (<! (put-object (str result-dir "/stderr") stderr)))
+     (if err
+       (exit 1 res)
+       (exit 0 res)))))
 
 (defn handle-ping [event]
   (take! (put-edn "pong.edn" event)
@@ -86,10 +108,10 @@
       (take! (g/fetch-event event)
         (fn [[err ok :as res]]
           (if err
-            (report-results res)
-            (take! (d/process-event event) report-results))))
+            (report-results event res)
+            (take! (d/process-event event) (partial report-results event)))))
       (catch js/Error err
-        (report-results [{:msg "Unhandled error" :cause (.-stack err)}])))))
+        (report-results event [{:msg "Unhandled error" :cause (.-stack err)}])))))
 
 (defn handle-event [{:keys [x-github-event ref] :as event}]
   (let []
@@ -97,13 +119,16 @@
     (case x-github-event
       "ping" (handle-ping event)
       "push" (handle-push event)
-      (report-results [{:msg (str "unrecognized event '" x-github-event "'")}]))))
+      (do
+        (log/err "Unmatched event" x-github-event)
+        (report-results event [{:msg (str "unrecognized event '" x-github-event "'")}])))))
 
 (defn -main [json-path]
   (let [file (io/file json-path)]
     (if-not (.exists file)
       (exit 1 [{:msg "expected path to json file in first argument"}])
-      (let [json (js/JSON.parse (io/slurp json-path))]
-        (handle-event (parse-event json))))))
+      (let [s (io/slurp json-path)]
+        (set! *raw-event-string* s)
+        (handle-event (parse-event (js/JSON.parse s)))))))
 
 (set! *main-cli-fn* -main)
