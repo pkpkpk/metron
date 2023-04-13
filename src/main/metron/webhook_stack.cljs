@@ -18,16 +18,14 @@
 
 (defn generate-deploy-key [iid]
   (with-promise out
-    (let [script (io/slurp (util/asset-path "scripts" "keygen.sh"))]
-      (take! (ssm/run-script iid script)
-        (fn [[err ok :as res]]
-          (if err
-            (put! out res)
-            (let [stdout (get ok :StandardOutputContent)
-                  key (-> stdout
-                        (string/replace ".ssh/id_rsa already exists.\nOverwrite (y/n)? "  "")
-                        string/trim)]
-              (put! out [nil key]))))))))
+    (take! (ssm/run-script iid "./bin/keygen.sh")
+      (fn [[err {stdout :StandardOutputContent} :as res]]
+        (if err
+          (put! out res)
+          (let [key (-> stdout
+                      (string/replace ".ssh/id_rsa already exists.\nOverwrite (y/n)? "  "")
+                      string/trim)]
+            (put! out [nil key])))))))
 
 (defn verify-deploy-key [iid]
   (with-promise out
