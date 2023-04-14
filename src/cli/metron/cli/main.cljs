@@ -3,6 +3,7 @@
   (:require [cljs.core.async :refer [go >! <! to-chan! put! take!]]
             [cljs.nodejs :as nodejs]
             [cljs-node-io.core :as io]
+            [cljs-node-io.file :refer [createTempFile]]
             [clojure.string :as string]
             [clojure.tools.cli :refer [parse-opts]]
             [metron.instance-stack :as instance]
@@ -24,13 +25,22 @@
        (str "Error running script on instance:" \newline
             (get m :StandardErrorContent))))
 
+(def ^:dynamic *json* false)
+
+(defn structured? [o]
+  (and (not (string? o))
+       (or (map? o)
+           (vector? o))))
+
 (defn exit [status data]
   (do
     (if (zero? status)
       (when data
         (let [output (if (string? data)
                        data
-                       (pp data))]
+                       (if *json*
+                         (js/JSON.stringify (clj->js data))
+                         (pp data)))]
           (log/stdout output)))
       (if (instance? js/Error data)
         (let [s (str "metron_error_" (js/Date.now))
@@ -38,17 +48,24 @@
           (io/spit f (.-stack data))
           (log/err (str (.-message data)))
           (log/err (str "more info in " (.getPath f))))
-        (let [[msg edn?] (if (string? data)
-                           [data false]
-                           (if-let [msg (or (and (map? data) (:msg data))
-                                            (ssm-response-err-msg data))]
-                             [msg true]
-                             [(str "Unknown error type " (type data)) false]))
-              s (str "metron_error_" (js/Date.now))
-              f (cljs-node-io.file/createTempFile s (if edn? ".edn" ".tmp"))]
-          (io/spit f (pp data))
-          (log/err msg)
-          (log/err (str "more info in " (.getPath f))))))
+        (let [filename (str "metron_error_" (js/Date.now))
+              [file content] (cond
+                               (not (structured? data))
+                               [(createTempFile filename ".tmp") data]
+
+                               (true? *json*)
+                               [(createTempFile filename ".json") (js/JSON.stringify (clj->js data))]
+
+                               true
+                               [(createTempFile filename ".edn") (pp data)])]
+          (when-let [msg (if (string? data)
+                           data
+                           (when-let [msg (or (and (map? data) (:msg data))
+                                              (ssm-response-err-msg data))]
+                             msg))]
+            (log/err msg))
+          (io/spit file content)
+          (log/err (str "more info in " (.getPath file))))))
     (.exit js/process status)))
 
 (def actions #{:create-webhook :delete-webhook :create-instance :delete-instance
@@ -66,12 +83,14 @@
 (def cli-options
   [["-h" "--help"]
    ["-q" "--quiet" "elide info logging from output to stderr"]
+   ["-j" "--json" "prefer json for structured output"]
    [nil "--push" "send latest commit from cwd to instance and run it"]
    [nil "--create-webhook" "create webhook stack"]
    [nil "--delete-webhook" "delete webhook stack"]
    [nil "--configure-webhook" "add/edit webhook with existing stack"]
    [nil "--create-instance" "create instance stack"]
    [nil "--delete-instance" "delete both instance and webhook stack. bucket is ignored"]
+   [nil "--describe-instance" "return full description of instance"]
    [nil "--delete" "delete both instance and webhook stack. bucket is ignored"]
    [nil "--status" "get description of instance state"]
    [nil "--start" "start instance"]
@@ -162,6 +181,8 @@
          (let [[err {:keys [region] :as cfg} :as res] (<! (resolve-config opts))]
            (when (:quiet opts)
              (set! metron.logging/*quiet?* true))
+           (when (:json opts)
+             (set! *json* true))
            (cond
              (some? err)
              (exit 1 err)
