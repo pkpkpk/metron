@@ -1,3 +1,5 @@
+#!/bin/bash
+
 json_file="$1"
 should_shutdown="$2"
 

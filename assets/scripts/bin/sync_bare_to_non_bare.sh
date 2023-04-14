@@ -5,7 +5,7 @@
 REPO_NAME=$1
 BRANCH=$2
 SHORT_SHA=$3
-REPOS_DIR="metron_repos"
+REPOS_DIR="remote_repos"
 BARE_REPO_NAME="bare_${REPO_NAME}"
 NON_BARE_REPO_NAME="${REPO_NAME}"
 

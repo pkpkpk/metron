@@ -4,7 +4,7 @@
 # bare repos are given a 'bare_' prefix
 
 REPO_NAME=$1
-REPOS_DIR="metron_repos"
+REPOS_DIR="remote_repos"
 REPO_PATH="${REPOS_DIR}/${REPO_NAME}"
 BARE_REPO_NAME="bare_${REPO_NAME}"
 BARE_REPO_PATH="${REPOS_DIR}/${BARE_REPO_NAME}"
