@@ -90,6 +90,7 @@
     (ssm/run-script iid cmd {:cwd non-bare-path})))
 
 (defn push [opts]
+  (log/info "pushing" (.cwd js/process) "to remote")
   (with-promise out
     (take! (instance/wait-for-ok)
       (fn [[err {:keys [InstanceId PublicDnsName] :as outputs} :as res]]

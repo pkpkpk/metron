@@ -56,7 +56,7 @@
         (if err
           (put! out res)
           (if (= state "running")
-            (put! out ok)
+            (put! out [nil ok])
             (take! (do
                      (log/info "starting instance " iid)
                      (ec2/start-instance iid))
@@ -185,7 +185,7 @@
                     (put! out [{:msg "error starting docker service using user-data"
                                 :info ok}])))))))))))
 
-(defn stack-params [{:keys [instance-type ami KeyName MemoryInfo]}]
+(defn stack-params [{:keys [instance-type ami KeyName cores threads]}]
   {:StackName "metron-instance-stack"
    :DisableRollback true ;;TODO
    :Capabilities #js["CAPABILITY_IAM" "CAPABILITY_NAMED_IAM"]
@@ -194,6 +194,10 @@
                     "ParameterValue" KeyName}
                 #js{"ParameterKey" "InstanceType"
                     "ParameterValue" instance-type}
+                #js{"ParameterKey" "Cores"
+                    "ParameterValue" cores}
+                #js{"ParameterKey" "ThreadsPerCore"
+                    "ParameterValue" threads}
                 #js{"ParameterKey" "LatestAmiId"
                     "ParameterValue" ami}]})
 
@@ -208,11 +212,32 @@
         (fn [[err {:keys [MemoryInfo ProcessorInfo VCpuInfo GpuInfo EbsInfo]} :as res]]
           (if err
             (put! out res)
-            ;;TODO use VCpuInfo to validate user args
-            (let [ami (if (= "arm64" (get ProcessorInfo [:SupportedArchitectures 0]))
+            (let [cores (if-let [cores (get opts :cores)]
+                           (if ((into #{} (get VCpuInfo :ValidCores)) cores)
+                             cores
+                             (do
+                               (log/warn "user provided core count" cores
+                                         "is invalid for instance-type" instance-type
+                                         "; using default" (:DefaultCores VCpuInfo))
+                               (:DefaultCores VCpuInfo)))
+                          (:DefaultCores VCpuInfo))
+                  threads (if-let [threads (get opts :threads)]
+                             (if ((into #{} (get VCpuInfo :ValidThreadsPerCore)) threads)
+                               threads
+                               (do
+                                 (log/warn "user provided ThreadsPerCore" threads
+                                           "is invalid for instance-type" instance-type
+                                           "; using default" (:DefaultThreadsPerCore VCpuInfo))
+                                 (:DefaultThreadsPerCore VCpuInfo)))
+                            (:DefaultThreadsPerCore VCpuInfo))
+                  ami (if (= "arm64" (get-in ProcessorInfo [:SupportedArchitectures 0]))
                          "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-arm64-gp2"
                          "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2")
-                  opts (assoc opts :instance-type instance-type :ami ami)]
+                  opts (assoc opts
+                              :instance-type instance-type
+                              :ami ami
+                              :cores cores
+                              :threads threads)]
               (put! out [nil (stack-params opts)]))))))))
 
 (defn create-instance-stack [{:as opts}]

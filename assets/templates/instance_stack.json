@@ -22,10 +22,20 @@
       "Type" : "String",
       "Default" : "t2.small"
     },
-
+    "Cores": {
+      "Type": "Number",
+      "Description": "Number of CPU cores",
+      "MinValue": 1,
+      "MaxValue": 64,
+    },
+    "ThreadsPerCore": {
+      "Type": "Number",
+      "Description": "Number of threads per CPU core",
+      "MinValue": 1,
+      "MaxValue": 64,
+    },
     "LatestAmiId" : {
       "Type": "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>",
-      "Default": "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2",
       "AllowedValues": [
         "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2",
         "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-arm64-gp2"
@@ -116,6 +126,10 @@
         "SecurityGroups" : [{"Ref" : "InstanceSecurityGroup"}],
         "KeyName" : {"Ref" : "KeyName"},
         "ImageId" : {"Ref": "LatestAmiId"},
+        "CpuOptions": {
+          "CoreCount": { "Ref": "Cores" },
+          "ThreadsPerCore": { "Ref": "ThreadsPerCore" }
+        },
         "UserData": {
           "Fn::Base64": {
               "Fn::Join": [

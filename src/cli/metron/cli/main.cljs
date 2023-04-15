@@ -84,12 +84,17 @@
   [["-h" "--help"]
    ["-q" "--quiet" "elide info logging from output to stderr"]
    ["-j" "--json" "prefer json for structured output"]
-   ["-t" "--instance-type InstanceType" "choose instance type for stack creation"]
+
+   [nil "--create-instance" "create instance stack"]
+   [nil "--instance-type InstanceType" "choose instance type for stack creation"]
+   [nil "--cores cores" "cpu cores" :parse-fn js/parseInt]
+   [nil "--threads threads" "threads per core" :parse-fn js/parseInt]
+
    [nil "--push" "send latest commit from cwd to instance and run it"]
    [nil "--create-webhook" "create webhook stack"]
    [nil "--delete-webhook" "delete webhook stack"]
    [nil "--configure-webhook" "add/edit webhook with existing stack"]
-   [nil "--create-instance" "create instance stack"]
+
    [nil "--delete-instance" "delete both instance and webhook stack. bucket is ignored"]
    [nil "--describe-instance" "return full description of instance"]
    [nil "--delete" "delete both instance and webhook stack. bucket is ignored"]
