@@ -73,7 +73,7 @@
   (assert (some? iid))
   (log/info "retrieving deploy-key from stack instance...")
   (with-promise out
-    (take! (instance/wait-for-ok iid)
+    (take! (instance/wait-for-ok)
       (fn [[err _ :as res]]
         (if err
           (put! out res)

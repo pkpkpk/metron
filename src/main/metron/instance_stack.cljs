@@ -14,24 +14,9 @@
 
 (def describe-stack (partial stack/describe-stack "metron-instance-stack"))
 
-(defn ^{:doc "cf will give stale info for ip/dns, unclear if iid ever changes"}
-  get-stack-outputs []
-  (with-promise out
-    (take! (stack/get-stack-outputs "metron-instance-stack")
-      (fn [[err {InstanceId :InstanceId :as outputs} :as res]]
-        (if err
-          (put! out res)
-          (take! (ec2/describe-instance InstanceId)
-            (fn [[err {:keys [PublicDnsName PublicIpAddress]} :as res]]
-              (if err
-                (put! out res)
-                (put! out [nil (assoc outputs
-                                      :PublicDnsName PublicDnsName
-                                      :PublicIpAddress PublicIpAddress)])))))))))
-
 (defn instance-id []
   (with-promise out
-    (take! (get-stack-outputs)
+    (take! (stack/get-stack-outputs "metron-instance-stack")
       (fn [[err {:keys [InstanceId] :as ok} :as res]]
         (if (some? err)
           (put! out res)
@@ -39,46 +24,49 @@
 
 (defn describe []
   (with-promise out
-    (take! (get-stack-outputs)
+    (take! (stack/get-stack-outputs "metron-instance-stack")
       (fn [[err {:keys [InstanceId] :as ok} :as res]]
         (if (some? err)
           (put! out res)
           (pipe1 (ec2/describe-instance InstanceId) out))))))
 
-(defn instance-state []
+(defn status "cf will give stale info for ip/dns" []
   (with-promise out
-    (take! (describe)
-      (fn [[err ok :as res]]
+    (take! (stack/get-stack-outputs "metron-instance-stack")
+      (fn [[err {InstanceId :InstanceId :as outputs} :as res]]
         (if err
           (put! out res)
-          (put! out [nil (get-in ok [:State :Name])]))))))
+          (take! (ec2/describe-instance InstanceId)
+            (fn [[err {:keys [PublicDnsName PublicIpAddress] :as ok} :as res]]
+              (if err
+                (put! out res)
+                (put! out [nil (into (sorted-map)
+                                     (assoc outputs
+                                            :PublicDnsName PublicDnsName
+                                            :PublicIpAddress PublicIpAddress
+                                            :CpuOptions (get ok :CpuOptions)
+                                            :Architecture (get ok :Architecture)
+                                            :ImageId (get ok :ImageId)
+                                            :State (get-in ok [:State :Name])))])))))))))
 
-(defn wait-for-ok
-  ([]
-   (with-promise out
-     (take! (get-stack-outputs)
-       (fn [[err {:keys [InstanceId] :as ok} :as res]]
-         (if err
-           (put! out res)
-           (pipe1 (wait-for-ok InstanceId) out))))))
-  ([iid]
-   (with-promise out
-     (take! (instance-state)
-        (fn [[err ok :as res]]
-          (if err
-            (put! out res)
-            (if (= "running" ok)
-              (pipe1 (get-stack-outputs) out)
-              (take! (do
-                       (log/info "starting instance " iid)
-                       (ec2/start-instance iid))
-                (fn [_]
-                  (log/info "Waiting for instance ok" iid)
-                  (take! (ec2/wait-for-ok iid)
-                    (fn [[err ok :as res]]
-                      (if err
-                        (put! out res)
-                        (pipe1 (get-stack-outputs) out)))))))))))))
+(defn wait-for-ok []
+  (with-promise out
+    (take! (status)
+      (fn [[err {iid :InstanceId state :State :as ok} :as res]]
+        (if err
+          (put! out res)
+          (if (= state "running")
+            (put! out ok)
+            (take! (do
+                     (log/info "starting instance " iid)
+                     (ec2/start-instance iid))
+              (fn [_]
+                (log/info "Waiting for instance ok" iid)
+                (take! (ec2/wait-for-ok iid)
+                  (fn [[err ok :as res]]
+                    (if err
+                      (put! out res)
+                      (pipe1 (status) out))))))))))))
 
 (defn ssh-args []
   (with-promise out
@@ -95,18 +83,18 @@
 (defn wait-for-stopped
   ([]
    (with-promise out
-     (take! (get-stack-outputs)
+     (take! (status)
        (fn [[err {:keys [InstanceId] :as ok} :as res]]
          (if err
            (put! out res)
            (pipe1 (wait-for-stopped InstanceId) out))))))
   ([iid]
    (with-promise out
-     (take! (instance-state)
-        (fn [[err ok :as res]]
+     (take! (status)
+        (fn [[err {state :State} :as res]]
           (if err
             (put! out res)
-            (if (= "stopped" ok)
+            (if (= state "stopped")
               (put! out [nil])
               (take! (do
                        (log/info "stopping instance " iid)
@@ -129,14 +117,6 @@
 
 (defn get-cloud-init-log []
   (run-script "cat /var/log/cloud-init-output.log"))
-
-(defn stack-params [key-pair-name]
-  {:StackName "metron-instance-stack"
-   :DisableRollback true ;;TODO
-   :Capabilities #js["CAPABILITY_IAM" "CAPABILITY_NAMED_IAM"]
-   :TemplateBody (io/slurp (util/asset-path "templates" "instance_stack.json"))
-   :Parameters [#js{"ParameterKey" "KeyName"
-                    "ParameterValue" key-pair-name}]})
 
 (defn bin-files []
   (let [parent (io/file (util/asset-path "scripts" "bin"))
@@ -205,6 +185,36 @@
                     (put! out [{:msg "error starting docker service using user-data"
                                 :info ok}])))))))))))
 
+(defn stack-params [{:keys [instance-type ami KeyName MemoryInfo]}]
+  {:StackName "metron-instance-stack"
+   :DisableRollback true ;;TODO
+   :Capabilities #js["CAPABILITY_IAM" "CAPABILITY_NAMED_IAM"]
+   :TemplateBody (io/slurp (util/asset-path "templates" "instance_stack.json"))
+   :Parameters [#js{"ParameterKey" "KeyName"
+                    "ParameterValue" KeyName}
+                #js{"ParameterKey" "InstanceType"
+                    "ParameterValue" instance-type}
+                #js{"ParameterKey" "LatestAmiId"
+                    "ParameterValue" ami}]})
+
+(defn resolve-stack-params
+  [{:keys [instance-type KeyName] :as opts}]
+  (with-promise out
+    (if (nil? instance-type)
+      (let [ami "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2"
+            opts (assoc opts :instance-type "t2.small" :ami ami)]
+        (put! out [nil (stack-params opts)]))
+      (take! (ec2/describe-instance-type instance-type)
+        (fn [[err {:keys [MemoryInfo ProcessorInfo VCpuInfo GpuInfo EbsInfo]} :as res]]
+          (if err
+            (put! out res)
+            ;;TODO use VCpuInfo to validate user args
+            (let [ami (if (= "arm64" (get ProcessorInfo [:SupportedArchitectures 0]))
+                         "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-arm64-gp2"
+                         "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2")
+                  opts (assoc opts :instance-type instance-type :ami ami)]
+              (put! out [nil (stack-params opts)]))))))))
+
 (defn create-instance-stack [{:as opts}]
   (with-promise out
     (take! (bkt/ensure-bucket opts)
@@ -215,20 +225,23 @@
             (fn [[err {KeyName :KeyName} :as res]]
               (if err
                 (put! out res)
-                (take! (stack/create (stack-params KeyName))
-                  (fn [[err {InstanceId :InstanceId :as outputs} :as res]]
+                (take! (resolve-stack-params (assoc opts :KeyName KeyName))
+                  (fn [[err params :as res]]
                     (if err
                       (put! out res)
-                      (take! (install (assoc opts :Bucket Bucket
-                                                  :InstanceId InstanceId))
-                        (fn [[err ok :as res]]
+                      (take! (stack/create params)
+                        (fn [[err {InstanceId :InstanceId :as outputs} :as res]]
                           (if err
                             (put! out res)
-                            (take! (reboot-with-docker-service InstanceId)
+                            (take! (install (assoc opts :Bucket Bucket :InstanceId InstanceId))
                               (fn [[err ok :as res]]
                                 (if err
                                   (put! out res)
-                                  (put! out [nil outputs]))))))))))))))))))
+                                  (take! (reboot-with-docker-service InstanceId)
+                                    (fn [[err ok :as res]]
+                                      (if err
+                                        (put! out res)
+                                        (put! out [nil outputs])))))))))))))))))))))
 
 (defn delete-instance-stack []
   (with-promise out

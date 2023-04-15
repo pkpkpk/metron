@@ -84,6 +84,7 @@
   [["-h" "--help"]
    ["-q" "--quiet" "elide info logging from output to stderr"]
    ["-j" "--json" "prefer json for structured output"]
+   ["-t" "--instance-type InstanceType" "choose instance type for stack creation"]
    [nil "--push" "send latest commit from cwd to instance and run it"]
    [nil "--create-webhook" "create webhook stack"]
    [nil "--delete-webhook" "delete webhook stack"]
@@ -141,7 +142,7 @@
                 (put! out res)
                 (put! out [nil])))))))))
 
-(defn status [])
+
 
 (defn dispatch-action [action opts]
   (case action
@@ -152,12 +153,12 @@
     :delete-instance (delete-stacks)
     :describe-instance (instance/describe)
     :delete (delete-stacks)
-    ; :delete-all bucket too?
-    :status (instance/describe)
+    :status (instance/status)
     :start (instance/wait-for-ok)
     :stop (instance/wait-for-stopped)
     :ssh (instance/ssh-args)
     :push (remote/push opts)
+    ; :delete-all bucket too?
     (to-chan! [[{:msg (str "umatched action: " (pr-str action))}]])))
 
 (defn resolve-config [_]

@@ -61,6 +61,22 @@
           (put! out res)
           (put! out [nil (get-in ok [:Reservations 0 :Instances 0])]))))))
 
+(defn describe-instance-status [iid]
+  (with-promise out
+    (take! (send (new (.-DescribeInstanceStatusCommand EC2) #js{:InstanceIds #js[iid]}))
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (put! out [nil (get-in ok [:InstanceStatuses 0])]))))))
+
+(defn describe-instance-type [instanceType]
+  (with-promise out
+    (take! (send (new (.-DescribeInstanceTypesCommand EC2) #js{:InstanceTypes #js[instanceType]}))
+      (fn [[err ok :as res]]
+        (if err
+          (put! out res)
+          (put! out [nil (get-in ok [:InstanceTypes 0])]))))))
+
 (defn get-user-data [iid]
   (with-promise out
     (take! (send (new (.-DescribeInstanceAttributeCommand EC2)

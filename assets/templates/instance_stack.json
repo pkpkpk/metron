@@ -14,18 +14,22 @@
     "InstanceType" : {
       "Description" : "EC2 instance type",
       "Type" : "String",
-      "Default" : "t2.small",
-      "AllowedValues" : [
-        "t1.micro",
-        "t2.nano",
-        "t2.micro",
-        "t2.small",
-        "t2.medium"]
+      "Default" : "t2.small"
+    },
+
+    "InstanceType" : {
+      "Description" : "EC2 instance type",
+      "Type" : "String",
+      "Default" : "t2.small"
     },
 
     "LatestAmiId" : {
-      "Default" : "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2",
-      "Type": "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>"
+      "Type": "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>",
+      "Default": "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2",
+      "AllowedValues": [
+        "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2",
+        "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-arm64-gp2"
+      ]
     },
 
     "SSHLocation" : {
@@ -43,7 +47,8 @@
       "Description" : "InstanceId of the newly created EC2 instance",
       "Value" : { "Ref" : "MetronInstance" }
     },
-    "KeyName": {"Value" : {"Ref" : "KeyName"}},
+    "InstanceType" : { "Value" : { "Ref" : "InstanceType" }},
+    "KeyName": { "Value" : {"Ref" : "KeyName"}},
     "AZ" : {
       "Description" : "Availability Zone of the newly created EC2 instance",
       "Value" : { "Fn::GetAtt" : [ "MetronInstance", "AvailabilityZone" ] }
