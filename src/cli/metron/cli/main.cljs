@@ -10,9 +10,11 @@
             [metron.logging :as log]
             [metron.remote :as remote]
             [metron.webhook-stack :as wh]
-            [metron.util :refer [pp p->res]]))
+            [metron.util :refer [pp p->res asset-path]]))
 
 (nodejs/enable-util-print!)
+
+(goog-define ^string VERSION "debug")
 
 (.on js/process "uncaughtException"
      (fn [err origin]
@@ -72,32 +74,23 @@
                :push :status :start :stop :configure-webhook :ssh :delete
                :describe-instance})
 
-(defn usage [options-summary] ;; TODO distinguish actions and their args
-  (->> ["Usage: node metron.js [options]*"
-        ""
-        "Options:"
-        options-summary
-        \newline]
-    (string/join \newline)))
+(defn usage [_] (io/slurp (asset-path "help.txt")))
 
 (def cli-options
   [["-h" "--help"]
+   ["-v" "--version"]
    ["-q" "--quiet" "elide info logging from output to stderr"]
    ["-j" "--json" "prefer json for structured output"]
-
    [nil "--create-instance" "create instance stack"]
    [nil "--instance-type InstanceType" "choose instance type for stack creation"]
    [nil "--cores cores" "cpu cores" :parse-fn js/parseInt]
    [nil "--threads threads" "threads per core" :parse-fn js/parseInt]
-
    [nil "--push" "send latest commit from cwd to instance and run it"]
    [nil "--create-webhook" "create webhook stack"]
    [nil "--delete-webhook" "delete webhook stack"]
    [nil "--configure-webhook" "add/edit webhook with existing stack"]
-
    [nil "--delete-instance" "delete both instance and webhook stack. bucket is ignored"]
    [nil "--describe-instance" "return full description of instance"]
-   [nil "--delete" "delete both instance and webhook stack. bucket is ignored"]
    [nil "--status" "get description of instance state"]
    [nil "--start" "start instance"]
    [nil "--stop" "ensure instance is stopped"]
@@ -109,11 +102,15 @@
        \newline))
 
 (defn validate-args [args]
-  (let [{:keys [options arguments errors summary] :as opts} (parse-opts args cli-options)
+  (let [{:keys [options arguments errors] :as opts} (parse-opts args cli-options :summary-fn #())
         [action :as actions] (reduce #(if (contains? options %2) (conj %1 %2) %1) [] actions)]
     (cond
       (:help options) ; help => exit OK with usage summary
-      {:exit-message (usage summary)
+      {:exit-message (usage options)
+       :ok? true}
+
+      (:version options)
+      {:exit-message VERSION
        :ok? true}
 
       (some? errors)
@@ -129,7 +126,7 @@
       (nil? action)
       {:action :help
        :opts options
-       :exit-message (usage summary) :ok? true}
+       :exit-message (usage options) :ok? true}
 
       true
       {:action action
@@ -147,8 +144,6 @@
                 (put! out res)
                 (put! out [nil])))))))))
 
-
-
 (defn dispatch-action [action opts]
   (case action
     :create-webhook (wh/create-webhook-stack opts)
@@ -157,7 +152,6 @@
     :create-instance (instance/ensure-ok opts)
     :delete-instance (delete-stacks)
     :describe-instance (instance/describe)
-    :delete (delete-stacks)
     :status (instance/status)
     :start (instance/wait-for-ok)
     :stop (instance/wait-for-stopped)

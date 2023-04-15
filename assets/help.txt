@@ -1,0 +1,41 @@
+Usage: metron [GLOBAL-OPTS] ACTION [ACTION-ARGS]...
+
+Special commands:
+  -h, --help
+  -v, --version              Return release version
+  --log                      Returns location of log file
+  --ssh [args]...            Starts ssh session and forwards args to ssh command
+                             Will automatically start a stopped instance.
+
+Global options affecting output. Order of appearance in cmd is not relevant
+  -j, --json                 Prefer json for structured output where applicable
+  -q, --quiet                Elide info logging to stderr. Does not suppress
+                             warning or error logs
+
+Instance Actions:
+  --create-instance create instance stack. Suboptions:
+    [--instance-type] The instance type for stack creation. Defaults to t2.small
+    [--cores]         Configure the VCpu cores for the instance type
+    [--threads]       Configure the ThreadsPerCore for the instance type
+
+  --delete-instance    Delete both instance and webhook stack. bucket is ignored
+  --describe-instance  Return full result of AWS SDK DescribeInstanceCommand
+  --status             Get relevant details of instance including running state
+  --start              Starts instance, returns when ready
+  --stop               Ensure instance is stopped
+
+Remote Actions:
+  --push               Send latest commit from cwd to instance and run it.
+                       Pipes stderr & stdout from container result
+
+Webhook Actions:
+  --create-webhook      Create webhook stack
+  --delete-webhook      Delete webhook stack
+  --configure-webhook   Add/edit webhook with existing stack
+
+Successful commands only write a single meaningful result to stdout where
+applicable. The only exception to this is webhook creation which requires
+user interaction
+
+Non-zero exits never return anything to stdout. The last line of stderr refers
+to a temp file with debug information
