@@ -16,8 +16,12 @@ node_args=()
 while [[ $# -gt 0 ]]
 do
     case "$1" in
+        --log-dir)
+            echo "$LOG_DIR"
+            exit 0
+            ;;
         --log)
-            echo "$LOG_FILE"
+            echo "$(cat $LOG_FILE)"
             exit 0
             ;;
         --ssh)

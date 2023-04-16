@@ -3,7 +3,8 @@ Usage: metron [GLOBAL-OPTS] ACTION [ACTION-ARGS]...
 Special commands:
   -h, --help
   -v, --version              Return release version
-  --log                      Returns location of log file
+  --log                      prints out most recent log file
+  --log-dir                  returns log file directory
   --ssh [args]...            Starts ssh session and forwards args to ssh command
                              Will automatically start a stopped instance.
 
