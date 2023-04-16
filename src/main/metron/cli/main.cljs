@@ -110,7 +110,7 @@
        :ok? true}
 
       (:version options)
-      {:exit-message VERSION
+      {:exit-message (str VERSION \newline)
        :ok? true}
 
       (some? errors)
