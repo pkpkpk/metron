@@ -186,20 +186,21 @@
                                 :info ok}])))))))))))
 
 (defn stack-params [{:keys [instance-type ami KeyName cores threads]}]
-  {:StackName "metron-instance-stack"
-   :DisableRollback true ;;TODO
-   :Capabilities #js["CAPABILITY_IAM" "CAPABILITY_NAMED_IAM"]
-   :TemplateBody (io/slurp (util/asset-path "templates" "instance_stack.json"))
-   :Parameters [#js{"ParameterKey" "KeyName"
-                    "ParameterValue" KeyName}
-                #js{"ParameterKey" "InstanceType"
-                    "ParameterValue" instance-type}
-                #js{"ParameterKey" "Cores"
-                    "ParameterValue" cores}
-                #js{"ParameterKey" "ThreadsPerCore"
-                    "ParameterValue" threads}
-                #js{"ParameterKey" "LatestAmiId"
-                    "ParameterValue" ami}]})
+  (let [params (cond-> [#js{"ParameterKey" "KeyName"
+                            "ParameterValue" KeyName}
+                        #js{"ParameterKey" "InstanceType"
+                            "ParameterValue" instance-type}
+                        #js{"ParameterKey" "LatestAmiId"
+                            "ParameterValue" ami}]
+                 cores   (conj #js{"ParameterKey" "Cores"
+                                   "ParameterValue" cores})
+                 threads (conj #js{"ParameterKey" "ThreadsPerCore"
+                                   "ParameterValue" threads}))]
+    {:StackName "metron-instance-stack"
+     :DisableRollback true ;;TODO
+     :Capabilities #js["CAPABILITY_IAM" "CAPABILITY_NAMED_IAM"]
+     :TemplateBody (io/slurp (util/asset-path "templates" "instance_stack.json"))
+     :Parameters params}))
 
 (defn resolve-stack-params
   [{:keys [instance-type KeyName] :as opts}]
@@ -266,7 +267,7 @@
                                     (fn [[err ok :as res]]
                                       (if err
                                         (put! out res)
-                                        (put! out [nil outputs])))))))))))))))))))))
+                                        (pipe1 (status) out)))))))))))))))))))))
 
 (defn delete-instance-stack []
   (with-promise out
