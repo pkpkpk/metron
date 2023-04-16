@@ -45,8 +45,6 @@
               :ContentType "text/plain"
               :Body (str val)})))
 
-
-
 (defn parse-event [json]
   (let [repo (some-> (.. json -body) (.. -repository) ->clj)
         head_commit (some->  (.. json -body) (.. -head_commit) ->clj)
@@ -79,7 +77,7 @@
        (log/err output)))
    (js/process.exit code)))
 
-(def ^dynamic *raw-event-string*)
+(def ^:dynamic *raw-event-string*)
 
 (defn report-results [{:keys [full_name] :as event} [err ok :as res]]
   (let [result-dir (str "webhook_results/" full_name "/" (g/short-sha event))
