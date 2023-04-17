@@ -1,0 +1,38 @@
+{
+  "name": "metron",
+  "description": "\"A utility for easily running benchmarks & tests on ec2 instances via docker\"",
+  "homepage": "https://github.com/pkpkpk/metron",
+  "repository": {
+    "type": "git",
+    "url": "https//github.com/pkpkpk/metron.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pkpkpk/metron/issues"
+  },
+  "version": "0.0.1",
+  "bin": "./bin/metron.sh",
+  "files": [
+    "assets/*",
+    "dist/*"
+  ],
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "docker",
+    "container",
+    "ec2",
+    "instance",
+    "benchmarking"
+  ],
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-cloudformation": "^3.289.0",
+    "@aws-sdk/client-ec2": "^3.289.0",
+    "@aws-sdk/client-iam": "^3.294.0",
+    "@aws-sdk/client-lambda": "^3.289.0",
+    "@aws-sdk/client-s3": "^3.282.0",
+    "@aws-sdk/client-ssm": "^3.289.0",
+    "@aws-sdk/credential-providers": "^3.306.0"
+  }
+}
