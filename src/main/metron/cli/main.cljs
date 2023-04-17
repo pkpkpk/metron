@@ -163,13 +163,20 @@
 (defn resolve-config [_]
   (let [ini (js/require "@aws-sdk/shared-ini-file-loader")
         profile (goog.object.get (.-env js/process) "AWS_PROFILE" "default")]
+    (log/info "using profile" profile)
     (with-promise out
       (take! (p->res (.loadSharedConfigFiles ini #js{:profile profile}))
         ;; possible bug if profile not keyword safe
-        (fn [[err {{config (keyword profile)} :configFile} :as res]]
+        (fn [[err {{config (keyword profile)} :configFile
+                   {cred (keyword profile)} :credentialsFile} :as res]]
           (if err
             (put! out res)
-            (put! out [nil (assoc config :profile profile)])))))))
+            (if (nil? cred)
+              (put! out [{:msg (str "missing credentials for profile " profile)}])
+              (if (or (nil? config)
+                      (nil? (:region config)))
+                (put! out [{:msg (str "please set the region field for profile " profile " in .aws/config")}])
+                (put! out [nil (assoc config :profile profile)])))))))))
 
 (defn -main [& args]
   (let [{:keys [action opts exit-message ok?] :as arg} (validate-args args)]
