@@ -17,7 +17,7 @@
       (fn [[err {{UserId :UserId} :User} :as res]]
         (if err
           (put! out res)
-          (let [bucket-name (str "metronbucket" UserId)]
+          (let [bucket-name (str "metronbucket" (string/lower-case UserId))]
             (set! *bucket-name* bucket-name)
             (put! out [nil bucket-name])))))))
 
