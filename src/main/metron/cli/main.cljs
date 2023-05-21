@@ -71,7 +71,7 @@
     (.exit js/process status)))
 
 (def actions #{:create-webhook :delete-webhook :create-instance :delete-instance
-               :push :status :start :stop :configure-webhook :ssh :delete
+               :push :run :status :start :stop :configure-webhook :ssh :delete
                :describe-instance})
 
 (defn usage [_] (io/slurp (asset-path "help.txt")))
@@ -81,11 +81,12 @@
    ["-v" "--version"]
    ["-q" "--quiet" "elide info logging from output to stderr"]
    ["-j" "--json" "prefer json for structured output"]
+   ["-r" "--run" "build and run a container for the latest commit on the instance"]
    [nil "--create-instance" "create instance stack"]
    [nil "--instance-type InstanceType" "choose instance type for stack creation"]
    [nil "--cores cores" "cpu cores" :parse-fn js/parseInt]
    [nil "--threads threads" "threads per core" :parse-fn js/parseInt]
-   [nil "--push" "send latest commit from cwd to instance and run it"]
+   [nil "--push" "send latest commit from cwd to the instance. -r option to run container after pushing"]
    [nil "--create-webhook" "create webhook stack"]
    [nil "--delete-webhook" "delete webhook stack"]
    [nil "--configure-webhook" "add/edit webhook with existing stack"]
@@ -157,6 +158,7 @@
     :stop (instance/wait-for-stopped)
     :ssh (instance/ssh-args)
     :push (remote/push opts)
+    :run (remote/run opts)
     ; :delete-all bucket too?
     (to-chan! [[{:msg (str "umatched action: " (pr-str action))}]])))
 

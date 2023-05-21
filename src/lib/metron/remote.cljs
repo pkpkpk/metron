@@ -12,6 +12,8 @@
             [metron.logging :as log]
             [metron.util :refer [asset-path pipe1]]))
 
+(def path (js/require "path"))
+
 (defn aexec [cmd]
   (with-promise out
     (take! (proc/aexec cmd {:encoding "utf8"})
@@ -67,7 +69,9 @@
           (if err
             (put! out res)
             (let [;_(log/info "<ec2-user ensure_bare_repo.sh>:" (string/trim-newline StandardErrorContent))
-                  key-path (.getPath (kp/?existing-file))
+                  key-file (kp/?existing-file)
+                  _(assert (some? key-file) "missing key file!")
+                  key-path (.getPath key-file)
                   bare-repo-path (string/trim-newline StandardOutputContent)
                   remote-url (metron-remote-url PublicDnsName bare-repo-path)
                   branch (string/trim-newline (current-branch))
@@ -82,6 +86,7 @@
 
 (defn docker-build [iid non-bare-path tag]
   (let [cmd (str "sudo -u ec2-user docker build -t " tag " ." )]
+    (log/info "building container" tag)
     (ssm/run-script iid cmd {:cwd non-bare-path})))
 
 (defn docker-run [iid non-bare-path tag]
@@ -89,31 +94,61 @@
     (log/info "running container...")
     (ssm/run-script iid cmd {:cwd non-bare-path})))
 
-(defn push [opts]
-  (log/info "pushing" (.cwd js/process) "to remote")
+(defn non-bare-path [repo-name]
+  (.join path "/home/ec2-user/remote_repos" repo-name))
+
+(defn _run [opts InstanceId]
+  ;; TODO warn when uncommited changes
   (with-promise out
-    (take! (instance/wait-for-ok)
-      (fn [[err {:keys [InstanceId PublicDnsName] :as outputs} :as res]]
-        (if err
-          (put! out res)
-          (if-let [errors (?validate-cwd)]
-            (put! out [{:errors errors :msg "Invalid local repository"}]) ;;TODO this doesnt report well
-            (take! (sync-repos outputs)
-              (fn [[err {:keys [StandardOutputContent]} :as res]]
+    (let [cwd (io/file (.cwd js/process))
+          repo-name (.getName cwd)
+          non-bare-path (non-bare-path repo-name)
+          tag (short-sha)]
+      (take! (docker-build InstanceId non-bare-path tag)
+        (fn [[err ok :as res]]
+          (if err
+            (put! out res)
+            (take! (docker-run InstanceId non-bare-path tag)
+              (fn [[err ok :as res]]
+                (if err
+                  (let [{:keys [StandardOutputContent StandardErrorContent]} err]
+                    (log/stderr StandardOutputContent)
+                    (log/stderr \newline)
+                    (put! out res))
+                  (let [{:keys [StandardOutputContent StandardErrorContent]} ok]
+                    (log/stderr StandardErrorContent)
+                    (log/stderr \newline)
+                    (put! out [nil StandardOutputContent])))))))))))
+
+(defn push [opts]
+  (with-promise out
+    (if-let [errors (?validate-cwd)]
+      (put! out [{:errors errors :msg "Invalid local repository"}])  ;;TODO this doesnt report well
+      (take! (instance/wait-for-ok)
+        (fn [[err {:keys [InstanceId PublicDnsName] :as outputs} :as res]]
+          (if err
+            (put! out res)
+            (take! (do
+                    (log/info "pushing" (.cwd js/process) "to remote" InstanceId)
+                    (sync-repos outputs))
+              (fn [[err ok :as res]]
                 (if err
                   (put! out res)
-                  (let [non-bare-path (string/trim-newline StandardOutputContent)
-                        _(assert (string/starts-with? non-bare-path "/home/ec2-user")
-                                 (str "expected path in home, got:'"non-bare-path"'"))
-                        tag (short-sha)]
-                    (take! (docker-build InstanceId non-bare-path tag)
-                      (fn [[err ok :as res]]
-                        (if err
-                          (put! out res)
-                          (take! (docker-run InstanceId non-bare-path tag)
-                            (fn [[err {:keys [StandardOutputContent StandardErrorContent]} :as res]]
-                              (if err
-                                (put! out res)
-                                (do
-                                  (run! log/stderr (string/split-lines StandardErrorContent))
-                                  (put! out [nil StandardOutputContent]))))))))))))))))))
+                  (if (get opts :run)
+                    (pipe1 (_run opts InstanceId) out)
+                    (do
+                      (log/info "successfully git pushed code to repo")
+                      (let [{:keys [StandardOutputContent StandardErrorContent]} ok]
+                        (log/stderr StandardErrorContent)
+                        (log/stderr \newline)
+                        (put! out [nil StandardOutputContent])))))))))))))
+
+(defn run [opts]
+  (with-promise out
+    (if-let [errors (?validate-cwd)]
+      (put! out [{:errors errors :msg "Invalid local repository"}]) ;;TODO this doesnt report well
+      (take! (instance/wait-for-ok)
+        (fn [[err {:keys [InstanceId] :as outputs} :as res]]
+          (if err
+            (put! out res)
+            (pipe1 (_run opts InstanceId) out)))))))
