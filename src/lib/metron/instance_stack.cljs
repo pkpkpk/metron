@@ -56,7 +56,11 @@
         (if err
           (put! out res)
           (if (= state "running")
-            (put! out [nil ok])
+            (take! (kp/ensure-authorized iid)
+              (fn [[err :as res]]
+                (if err
+                  (put! out res)
+                  (put! out [nil ok]))))
             (take! (do
                      (log/info "starting instance " iid)
                      (ec2/start-instance iid))
@@ -66,7 +70,15 @@
                   (fn [[err ok :as res]]
                     (if err
                       (put! out res)
-                      (pipe1 (status) out))))))))))))
+                      (take! (kp/ensure-authorized iid)
+                        (fn [[err :as res]]
+                          (if err
+                            (put! out res)
+                            (take! (ssm/run-script iid "sudo service docker start")
+                              (fn [[err ok :as res]]
+                                (if err
+                                  (put! out res)
+                                  (pipe1 (status) out))))))))))))))))))
 
 (defn ssh-args []
   (with-promise out
