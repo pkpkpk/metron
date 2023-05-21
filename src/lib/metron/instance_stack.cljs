@@ -275,11 +275,8 @@
                               (fn [[err ok :as res]]
                                 (if err
                                   (put! out res)
-                                  (take! (reboot-with-docker-service InstanceId)
-                                    (fn [[err ok :as res]]
-                                      (if err
-                                        (put! out res)
-                                        (pipe1 (status) out)))))))))))))))))))))
+                                  ;; TODO webhook needs to reboot user-data to auto start docker
+                                  (pipe1 (status) out))))))))))))))))))
 
 (defn delete-instance-stack []
   (with-promise out
